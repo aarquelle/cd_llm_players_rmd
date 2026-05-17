@@ -136,7 +136,7 @@ as the test that were submitted before/after the test was submitted.
 
 ```{r}
 
-tmp <- tests |>
+deftests |>
   pivot_longer(
     cols = c(kill_rate, llm_kill_rate, human_kill_rate, existing_kill_rate, future_kill_rate),
     names_to = "kill_rate_type",
@@ -155,16 +155,13 @@ tmp <- tests |>
                                    "Against llm mutants",
                                    "Against existing mutants",
                                    "Against future mutants"
-                                 )))
-
-ggplot(data = tmp, 
-       aes(x = llm_or_human, y = kill_rate_value, fill = opponent_llm_or_human)
-       ) + 
-  geom_boxplot(position = "dodge") + 
-  xlab("Defender") +
-  scale_y_continuous(name = "Kill rate", labels = percent) + 
-  scale_fill_manual(name = "Attacker", values = colors.actor) +
-  facet_wrap( ~ kill_rate_type)
+                                 ))) |>
+  ggplot(aes(x = llm_or_human, y = kill_rate_value, fill = opponent_llm_or_human)) + 
+    geom_boxplot(position = "dodge") + 
+    xlab("Defender") +
+    scale_y_continuous(name = "Kill rate", labels = percent) + 
+    scale_fill_manual(name = "Attacker", values = colors.actor) +
+    facet_wrap( ~ kill_rate_type)
 ```
 # Relationship between points and killrates
 
@@ -177,38 +174,35 @@ Mutants that were declared as equivalent while not being killed by any test
 were excluded from the sample.
 
 ```{r}
-tmp <- tests |> 
-  filter(!is_equivalence_test,) |>
+deftests |> 
   mutate(
     point_ntil = ntile(points, n = 10)
   ) |>
-  group_by(point_ntil)
-
-ggplot(tmp, aes(y = kill_rate, x = factor(point_ntil), fill = llm_or_human)) +
-  geom_boxplot() +
-  scale_fill_manual(values = colors.actor, name = "Defender") + 
-  ggtitle("Kill rates vs Points for tests") +
-  xlab("Point deciles") + 
-  ylab("Total kill rate") +
-  scale_y_continuous(labels = percent)
+  group_by(point_ntil) |>
+  ggplot(aes(y = kill_rate, x = factor(point_ntil), fill = llm_or_human)) +
+    geom_boxplot() +
+    scale_fill_manual(values = colors.actor, name = "Defender") + 
+    ggtitle("Kill rates vs Points for tests") +
+    xlab("Point deciles") + 
+    ylab("Total kill rate") +
+    scale_y_continuous(labels = percent)
 
 ```
 
 ```{r}
-tmp <- mutants |> 
+mutants |> 
   filter(!(!has_been_killed &declared_equivalent)) |>
   mutate(
     point_ntil = ntile(points, n = 10)
   ) |>
-  group_by(point_ntil)
-
-ggplot(tmp, aes(y = evasion_rate, x = factor(point_ntil), fill = llm_or_human)) +
-  geom_boxplot() +
-  scale_fill_manual(values = colors.actor, name = "Attacker") + 
-  ggtitle("Evasion rates vs Points for mutants") +
-  xlab("Point deciles") + 
-  ylab("Total evasion rate") +
-  scale_y_continuous(labels = percent)
+  group_by(point_ntil) |>
+  ggplot(aes(y = evasion_rate, x = factor(point_ntil), fill = llm_or_human)) +
+    geom_boxplot() +
+    scale_fill_manual(values = colors.actor, name = "Attacker") + 
+    ggtitle("Evasion rates vs Points for mutants") +
+    xlab("Point deciles") + 
+    ylab("Total evasion rate") +
+    scale_y_continuous(labels = percent)
 ```
 
 ```{r}
@@ -248,8 +242,7 @@ timelineplot <- function(.data) {
     geom_line()
 }
 
-tests |>
-  filter(!is_equivalence_test) |>
+deftests |>
   timelineplot() +
   ylab("Test submissions per game and minute") +
   scale_colour_manual(values = colors.actor, name = "Defender")
@@ -278,37 +271,35 @@ as part of the initial test suite and were successfully submitted on first try.
 
 
 ```{r}
-tmp <- tests[tests$llm_or_human == "LLM",] |>
+deftests|>
+  filter(llm_or_human == "LLM") |>
   mutate(number_of_messages = ifelse(is.na(number_of_messages), 0, number_of_messages)) |>
   mutate(number_of_messages = factor(number_of_messages,
                                      levels = c(0, 1,2,3,4),
                                      labels = c("Suite", "1", "2", "3", "4"))) |>
   mutate(seconds_since_gamestart = seconds_since_gamestart / 60) |>
   rename(`Minutes since gamestart` = seconds_since_gamestart) |>
-  group_by(number_of_messages)
-
-
-ggplot(data = tmp, aes(x = `Minutes since gamestart`, colour = number_of_messages)) +
-  geom_freqpoly(binwidth = 1) + 
-  ylab("Tests per minute") +
-  scale_colour_manual(name = "Number of messages", values = c("black", colors.quality))
+  group_by(number_of_messages) |>
+  ggplot(aes(x = `Minutes since gamestart`, colour = number_of_messages)) +
+    geom_freqpoly(binwidth = 1) + 
+    ylab("Tests per minute") +
+    scale_colour_manual(name = "Number of messages", values = c("black", colors.quality))
   
 ```
 
 ```{r}
-tmp <- mutants[mutants$llm_or_human == "LLM", ] |>
+mutants|>
+  filter(llm_or_human == "LLM") |>
   mutate(number_of_messages = factor(number_of_messages,
                                      levels = c(0, 1,2,3,4),
                                      labels = c("Suite", "1", "2", "3", "4"))) |>
   mutate(seconds_since_gamestart = seconds_since_gamestart / 60) |>
   rename(`Minutes since gamestart` = seconds_since_gamestart) |>
-  group_by(number_of_messages)
-
-
-ggplot(data = tmp, aes(x = `Minutes since gamestart`, colour = number_of_messages)) +
-  geom_freqpoly(binwidth = 1) + 
-  ylab("Mutants per minute") +
-  scale_colour_manual(name = "Number of messages", values = c(colors.quality))
+  group_by(number_of_messages) |>
+  ggplot(aes(x = `Minutes since gamestart`, colour = number_of_messages)) +
+    geom_freqpoly(binwidth = 1) + 
+    ylab("Mutants per minute") +
+    scale_colour_manual(name = "Number of messages", values = c(colors.quality))
 ```
 
 
@@ -319,37 +310,34 @@ LLM-generated tests are almost never confused for human-written tests,
 but mutants are hardly distinguishable.
 
 ```{r}
-tmp <- tests |>
-  filter(opponent_llm_or_human == "Human", !is_equivalence_test) |>
+deftests |>
+  filter(opponent_llm_or_human == "Human") |>
   group_by(game_id, author_nickname, opponent_opinion_human_or_ai, llm_or_human) |>
   mutate(opponent_opinion_human_or_ai = factor(opponent_opinion_human_or_ai, levels = 1:5, labels = interpretation.opponent_opinion_human_or_ai)) |>
-  summarise(n = n())
-
-ggplot(data = tmp, aes(x = llm_or_human, y = n, fill = opponent_opinion_human_or_ai)) + 
-  geom_col(position = "fill", name = "Proportion") +
-  scale_fill_manual(name = "Attacker's guess", values = colors.opinion) +
-  xlab("Defender") +
-  ylab("Proportion") +
-  ggtitle("Defender Turing test") + 
-  scale_y_continuous(labels = percent)
+  summarise(n = n()) |>
+  ggplot(aes(x = llm_or_human, y = n, fill = opponent_opinion_human_or_ai)) + 
+    geom_col(position = "fill", name = "Proportion") +
+    scale_fill_manual(name = "Attacker's guess", values = colors.opinion) +
+    xlab("Defender") +
+    ylab("Proportion") +
+    ggtitle("Defender Turing test") + 
+    scale_y_continuous(labels = percent)
 
 ```
 
 ```{r}
-mutant_players <- mutants[mutants$opponent_llm_or_human == "Human" & !duplicated(mutants[,c("game_id", "author_nickname")]), c("game_id", "author_nickname", "llm_or_human", "opponent_opinion_human_or_ai")]
-mutant_players <-mutant_players %>%
-  mutate(opponent_opinion_human_or_ai = factor(opponent_opinion_human_or_ai, levels = 1:5, labels = interpretation.opponent_opinion_human_or_ai))
-mutant_counts <-mutant_players %>% 
-  count(llm_or_human, opponent_opinion_human_or_ai)
-
-ggplot(data = mutant_counts, aes(x = llm_or_human, y = n, fill = opponent_opinion_human_or_ai)) + 
-  geom_col(position = "fill", name = "Proportion") +
-  scale_fill_manual(name = "Defender's guess", values = colors.opinion) +
-  scale_y_continuous(labels = percent) +
-  xlab("Attacker") +
-  ylab("Proportion") + 
-  ggtitle("Attacker Turing test")
-rm(mutant_counts)
+mutants |>
+  filter(opponent_llm_or_human == "Human") |>
+  group_by(game_id, author_nickname, opponent_opinion_human_or_ai, llm_or_human) |>
+  mutate(opponent_opinion_human_or_ai = factor(opponent_opinion_human_or_ai, levels = 1:5, labels = interpretation.opponent_opinion_human_or_ai)) |>
+  summarise(n = n()) |>
+  ggplot(aes(x = llm_or_human, y = n, fill = opponent_opinion_human_or_ai)) + 
+    geom_col(position = "fill", name = "Proportion") +
+    scale_fill_manual(name = "Defender's guess", values = colors.opinion) +
+    scale_y_continuous(labels = percent) +
+    xlab("Attacker") +
+    ylab("Proportion") + 
+    ggtitle("Attacker Turing test")
 ```
 # Stillborn mutants
 
@@ -365,27 +353,23 @@ This last point can possibly be explained by the fact that LLM defenders first
 generate a complete test suite before writing individual tests.
 
 ```{r}
-tmp <- mutants %>%
-  group_by(llm_or_human, opponent_llm_or_human) %>%
+mutants |>
+  group_by(llm_or_human, opponent_llm_or_human) |>
   summarise(
     stillborn = mean(stillborn)
-  ) %>%
-  mutate(
-    stillborn = round(stillborn, digits = 3)
-  )
-
-ggplot(data=tmp, aes(x = llm_or_human, y = stillborn, fill = opponent_llm_or_human)) +
-  geom_col(position = "dodge") +
-  geom_text(
-    aes(label = percent(stillborn)), 
-    position = position_dodge(0.9),
-    vjust = 1.5,
-  ) +
-  scale_fill_manual(name = "Defender", values = colors.actor) + 
-  xlab("Attacker") + 
-  ylab("Percentage") + 
-  ggtitle("Percentages of stillborn mutants") +
-  scale_y_continuous(labels = percent)
+  ) |>
+  ggplot(aes(x = llm_or_human, y = stillborn, fill = opponent_llm_or_human)) +
+    geom_col(position = "dodge") +
+    geom_text(
+      aes(label = percent(stillborn)), 
+      position = position_dodge(0.9),
+      vjust = 1.5,
+    ) +
+    scale_fill_manual(name = "Defender", values = colors.actor) + 
+    xlab("Attacker") + 
+    ylab("Percentage") + 
+    ggtitle("Percentages of stillborn mutants") +
+    scale_y_continuous(labels = percent)
 
 ```
 There are, however, only very slight differences in total evasion rates
@@ -427,7 +411,7 @@ advantage to the attacker. LLM-vs-LLM games are therefore not comparable to the
 other combinations.
 ```{r}
 
-tmp <- mutants |>
+mutants |>
   group_by(
     llm_or_human,
     declared_equivalent,
@@ -438,27 +422,25 @@ tmp <- mutants |>
   ) |>
   mutate(
     opponent_llm_or_human = paste(opponent_llm_or_human, "Defender")
-  )
-
-ggplot(
-  data = tmp, 
-  aes(x = declared_equivalent, y = not_killed, fill = llm_or_human)
-  ) +
-  geom_col(position = "dodge") +
-  geom_text(aes(
-    label = percent(not_killed),
-    vjust = -0.4
-    ), position = position_dodge(0.9)) +
-  facet_wrap( ~ opponent_llm_or_human,) + 
-  scale_y_continuous(labels = percent, name = "Equivalent mutants") + 
-  scale_x_discrete(labels = c("Not declared\n equivalent", "Declared equivalent")) +
-  scale_fill_manual(name = "Attacker", values = colors.actor) +
-  xlab(NULL)
+  ) |>
+  ggplot(
+    aes(x = declared_equivalent, y = not_killed, fill = llm_or_human)
+    ) +
+    geom_col(position = "dodge") +
+    geom_text(aes(
+      label = percent(not_killed),
+      vjust = -0.4
+      ), position = position_dodge(0.9)) +
+    facet_wrap( ~ opponent_llm_or_human,) + 
+    scale_y_continuous(labels = percent, name = "Equivalent mutants") + 
+    scale_x_discrete(labels = c("Not declared\n equivalent", "Declared equivalent")) +
+    scale_fill_manual(name = "Attacker", values = colors.actor) +
+    xlab(NULL)
 
   
 ```
 ```{r}
-tmp <- mutants |>
+mutants |>
   group_by(
     llm_or_human,
     opponent_llm_or_human,
@@ -469,22 +451,20 @@ tmp <- mutants |>
   ) |>
   mutate(
     opponent_llm_or_human = paste(opponent_llm_or_human, "Defender")
-  )
-
-ggplot(
-  data = tmp, 
-  aes(x = has_been_killed, y = declared_equivalent, fill = llm_or_human)
-  ) +
-  geom_col(position = "dodge") +
-  geom_text(aes(
-    label = percent(declared_equivalent),
-    vjust = -0.4
-    ), position = position_dodge(0.9)) +
-  facet_wrap( ~ opponent_llm_or_human,) + 
-  scale_y_continuous(labels = percent, name = "Mutants declared as equivalent") + 
-  scale_x_discrete(labels = c("Equivalent", "Not equivalent")) +
-  scale_fill_manual(name = "Attacker", values = colors.actor) +
-  ggtitle("Equivalent mutants") + 
-  xlab(NULL)
+  ) |>
+  ggplot(
+    aes(x = has_been_killed, y = declared_equivalent, fill = llm_or_human)
+    ) +
+    geom_col(position = "dodge") +
+    geom_text(aes(
+      label = percent(declared_equivalent),
+      vjust = -0.4
+      ), position = position_dodge(0.9)) +
+    facet_wrap( ~ opponent_llm_or_human,) + 
+    scale_y_continuous(labels = percent, name = "Mutants declared as equivalent") + 
+    scale_x_discrete(labels = c("Equivalent", "Not equivalent")) +
+    scale_fill_manual(name = "Attacker", values = colors.actor) +
+    ggtitle("Equivalent mutants") + 
+    xlab(NULL)
 ```
 
