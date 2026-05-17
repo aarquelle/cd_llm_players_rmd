@@ -683,3 +683,60 @@ mutants |>
 ```
 ## Which lines were covered and mutated?
 TODO
+
+# Game statistics
+The following statistics are about entire games, not about individual tests
+and mutants.
+
+```{r}
+defender_games <- deftests |>
+  group_by(
+    game_id, 
+    author_nickname, 
+    across(starts_with("author_")), 
+    across(starts_with("opponent_")),
+    llm_or_human,
+    cut,
+    experiment_round
+    ) |>
+  summarise(
+    points = sum(points)
+  )
+
+attacker_games <- mutants |>
+  group_by(
+    game_id, 
+    author_nickname, 
+    across(starts_with("author_")), 
+    across(starts_with("opponent_")),
+    llm_or_human,
+    cut,
+    experiment_round
+    ) |>
+  summarise(
+    points = sum(points)
+  )
+```
+
+```{r}
+defender_games |>
+  ggplot(aes(y = points, x = llm_or_human, fill = opponent_llm_or_human)) +
+  geom_boxplot() +
+  scale_fill_manual(name = "Attacker", values = colors.actor) +
+  ylab("Points") +
+  xlab("Defender") +
+  ggtitle("Defender games")
+```
+
+```{r}
+attacker_games |>
+  ggplot(aes(y = points, x = llm_or_human, fill = opponent_llm_or_human)) +
+  geom_boxplot() +
+  scale_fill_manual(name = "Defender", values = colors.actor) +
+  ylab("Points") +
+  xlab("Attacker") +
+  ggtitle("Attacker games")
+```
+
+
+
