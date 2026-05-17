@@ -163,6 +163,146 @@ deftests |>
     scale_fill_manual(name = "Attacker", values = colors.actor) +
     facet_wrap( ~ kill_rate_type)
 ```
+
+# Evasion rate
+
+An evasion rate is the equivalent of a kill rate for mutants: How many of the
+tests in a specific population that cover this test could this mutant survive?
+
+```{r}
+mutants |>
+  pivot_longer(
+    cols = c(evasion_rate, llm_evasion_rate, human_evasion_rate, existing_evasion_rate, future_evasion_rate),
+    names_to = "evasion_rate_type",
+    values_to = "evasion_rate_value"
+  ) |>
+  mutate(evasion_rate_type = factor(evasion_rate_type, 
+                                 levels = c(
+                                   "evasion_rate", 
+                                   "human_evasion_rate", 
+                                   "llm_evasion_rate", 
+                                   "existing_evasion_rate",
+                                   "future_evasion_rate"),
+                                 labels = c(
+                                   "Total evasion rate",
+                                   "Against human tests",
+                                   "Against llm tests",
+                                   "Against existing tests",
+                                   "Against future tests"
+                                 ))) |>
+  ggplot(aes(x = llm_or_human, y = evasion_rate_value, fill = opponent_llm_or_human)) + 
+    geom_boxplot(position = "dodge") + 
+    xlab("Attacker") +
+    scale_y_continuous(name = "Evasion rate", labels = percent) + 
+    scale_fill_manual(name = "Defender", values = colors.actor) +
+    facet_wrap( ~ evasion_rate_type)
+```
+
+
+# Points
+
+## Points of individual tests
+
+The following plots show the distribution of points for tests and mutants.
+As we can see, most tests score very low, with some exceptionally high outliers.
+
+```{r}
+point_boxplot <- function(.data, author = "Author", opponent = "Opponent") {
+  .data |>
+    ggplot(aes(x = llm_or_human, y = points, fill = opponent_llm_or_human)) + 
+    geom_boxplot() +
+    scale_fill_manual(values = colors.actor, name = opponent) +
+    xlab(author) +
+    ylab("Points")
+}
+
+deftests |>
+  point_boxplot()
+```
+
+This plot shows the percentage of tests with at least one point. When playing
+against an LLM attacker, humans and LLM defenders get at least one point
+at almost the exact same rate, but against humans, human defenders score more
+often.
+
+```{r}
+deftests |>
+  mutate(has_points = points > 0) |>
+  group_by(llm_or_human, opponent_llm_or_human) |>
+  summarise(has_points = mean(has_points)) |>
+  ggplot(aes(y = has_points, x = llm_or_human, fill = opponent_llm_or_human)) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = percent(after_stat(y))), vjust = 1.5, position = position_dodge(0.9)) +
+  scale_fill_manual(values = colors.actor, name = "Attacker") +
+  scale_y_continuous(labels = percent, name = NULL)+ 
+  xlab("Defender") +
+  ggtitle("Tests with at least one point")
+```
+The average human-written tests scores higher than the average LLM-written test.
+
+```{r}
+deftests |>
+  group_by(llm_or_human, opponent_llm_or_human) |>
+  summarise(mean_points = mean(points)) |>
+  ggplot(aes(x = llm_or_human, y = mean_points, fill = opponent_llm_or_human)) +
+  geom_col(position = "dodge") +
+  geom_text(
+    aes(label = mean_points |> round(2)), 
+    position = position_dodge(0.9),
+    vjust = 1.5
+    ) +
+  xlab("Defender") +
+  ylab("Points") +
+  ggtitle("Average test points") + 
+  scale_fill_manual(name = "Attacker", values = colors.actor)
+```
+## Points of individual mutants
+
+Same as with tests, mutant points are usually very low, with some outliers.
+
+```{r}
+mutants |>
+  point_boxplot()
+```
+Humans are somewhat more successful in writing mutants that garner at least one
+point. Getting at least a single point against a human defender seems to be much
+easier for both LLM and human attackers, compared with an LLM defender.
+
+```{r}
+mutants |>
+  mutate(has_points = points > 0) |>
+  group_by(llm_or_human, opponent_llm_or_human) |>
+  summarise(has_points = mean(has_points)) |>
+  ggplot(aes(y = has_points, x = llm_or_human, fill = opponent_llm_or_human)) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = percent(after_stat(y))), vjust = 1.5, position = position_dodge(0.9)) +
+  scale_fill_manual(values = colors.actor, name = "Defender") +
+  scale_y_continuous(labels = percent, name = NULL)+ 
+  xlab("Attacker") +
+  ggtitle("Mutants with at least one point")
+```
+In contrast, the average number of points is higher when playing against an
+LLM defender compared to a human defender. Average mutant points are
+generally much higher for human attackers.
+
+```{r}
+deftests |>
+  group_by(llm_or_human, opponent_llm_or_human) |>
+  summarise(mean_points = mean(points)) |>
+  ggplot(aes(x = llm_or_human, y = mean_points, fill = opponent_llm_or_human)) +
+  geom_col(position = "dodge") +
+  geom_text(
+    aes(label = mean_points |> round(2)), 
+    position = position_dodge(0.9),
+    vjust = 1.5
+    ) +
+  xlab("Attacker") +
+  ylab("Points") +
+  ggtitle("Average mutant points") + 
+  scale_fill_manual(name = "Defender", values = colors.actor)
+```
+
+
 # Relationship between points and killrates
 
 While there is no clear pattern for the relationship between the points
@@ -467,4 +607,79 @@ mutants |>
     ggtitle("Equivalent mutants") + 
     xlab(NULL)
 ```
+# Survival rates
+The following plots show the percentage of mutants within the specified 
+population that survive until the end of their game.
 
+Human-written mutants have much lower survival rates when the defender is
+an LLM player compared to a human player.
+
+The survival rate is 0% for LLM-vs-LLM games, because all surviving mutants are
+automatically claimed as equivalent at the end of the game.
+
+```{r}
+mutants |>
+  group_by(llm_or_human, opponent_llm_or_human) |>
+  summarise(`Survival rate` = mean(survived)) |>
+  ggplot(aes(y = `Survival rate`, x = llm_or_human, fill = opponent_llm_or_human)) +
+  scale_fill_manual(values = colors.actor, name = "Defender") +
+  xlab("Attacker") + 
+  scale_y_continuous(name = "Survival rate", labels = percent) +
+  geom_col(position = "dodge") + 
+  geom_text(aes(label = percent(`Survival rate`)), vjust = -0.2, position = position_dodge(0.9)) + 
+  ggtitle("Mutant survival rates")
+```
+```{r}
+mutants |>
+  filter(!stillborn) |>
+  group_by(llm_or_human, opponent_llm_or_human) |>
+  summarise(`Survival rate` = mean(survived)) |>
+  ggplot(aes(y = `Survival rate`, x = llm_or_human, fill = opponent_llm_or_human)) +
+  scale_fill_manual(values = colors.actor, name = "Defender") +
+  xlab("Attacker") + 
+  scale_y_continuous(name = "Survival rate", labels = percent) +
+  geom_col(position = "dodge") + 
+  geom_text(aes(label = percent(`Survival rate`)), vjust = -0.2, position = position_dodge(0.9)) +
+  ggtitle("Mutant survival rates (excluding stillborn mutants)")
+```
+
+# Line coverage
+
+This plot shows the number of lines being covered by a test.
+LLM generated tests cover slightly more lines than human written tests.
+
+```{r}
+deftests |>
+  ggplot(aes(x = llm_or_human, y = number_lines_covered, fill = opponent_llm_or_human)) +
+  geom_boxplot() +
+  scale_fill_manual(values = colors.actor, name = "Attacker") +
+  facet_wrap( ~ cut) +
+  xlab("Defender") + 
+  ylab("Covered lines") + 
+  ggtitle("Test coverage")
+```
+For mutants, the difference is more pronounced. Most human mutants only change a
+single line, while LLM mutants often change multiple lines.
+
+However, this counts all changes, including changes to comments which were
+illegal for human players, but permitted to LLM players.
+
+```{r}
+mutants |>
+  ggplot(aes(x = llm_or_human, y = number_mutated_lines, fill = opponent_llm_or_human)) +
+  geom_boxplot() +
+  scale_fill_manual(values = colors.actor, name = "Defender") +
+  xlab("Attacker") + 
+  ylab("Mutated lines") + 
+  ggtitle("Mutated lines") + 
+  stat_summary(
+    fun = median,
+    geom = "text",
+    aes(label = after_stat(y)),
+    vjust = -0.5,
+    position = position_dodge(1)
+  ) +
+  facet_wrap( ~ cut)
+```
+## Which lines were covered and mutated?
+TODO
