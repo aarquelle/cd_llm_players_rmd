@@ -26,7 +26,7 @@ detach.dfs <- function() {
 }
 
 colors.opinion <- c("red", "orange", "grey", "cyan", "blue")
-colors.actor <- c("turquoise3", "thistle3")
+colors.actor <- c("turquoise3", "thistle4")
 colors.quality <- c("#458B00", "darkgoldenrod3", "#8B1C62", "red4")
 
 interpretation.opponent_opinion_human_or_ai <- as.factor(c(
@@ -121,6 +121,8 @@ number_of_mutant_games <- mutants |>
   summarise(
     n = n_distinct(game_id)
   )
+
+deftests <- tests |> filter(!is_equivalence_test)
 ```
 
 # Killrates
@@ -164,62 +166,112 @@ ggplot(data = tmp,
   scale_fill_manual(name = "Attacker", values = colors.actor) +
   facet_wrap( ~ kill_rate_type)
 ```
+# Relationship between points and killrates
+
+While there is no clear pattern for the relationship between the points
+earned in-game by test and their total "kill-rate" against all mutants submitted
+in the study, mutants that earn many points tend to have higher "evasion-rates"
+against all tests submitted in the study.
+
+Mutants that were declared as equivalent while not being killed by any test
+were excluded from the sample.
 
 ```{r}
-plot(tests$points ~ tests$kill_rate,
-     xlab = "Global kill rate",
-     ylab = "test points",
-     main = "Relationship between global Killrate and points")
-abline(lm(points ~ kill_rate, data = tests), v = mean(tests$kill_rate))
+tmp <- tests |> 
+  filter(!is_equivalence_test,) |>
+  mutate(
+    point_ntil = ntile(points, n = 10)
+  ) |>
+  group_by(point_ntil)
+
+ggplot(tmp, aes(y = kill_rate, x = factor(point_ntil), fill = llm_or_human)) +
+  geom_boxplot() +
+  scale_fill_manual(values = colors.actor, name = "Defender") + 
+  ggtitle("Kill rates vs Points for tests") +
+  xlab("Point deciles") + 
+  ylab("Total kill rate") +
+  scale_y_continuous(labels = percent)
 
 ```
+
+```{r}
+tmp <- mutants |> 
+  filter(!(!has_been_killed &declared_equivalent)) |>
+  mutate(
+    point_ntil = ntile(points, n = 10)
+  ) |>
+  group_by(point_ntil)
+
+ggplot(tmp, aes(y = evasion_rate, x = factor(point_ntil), fill = llm_or_human)) +
+  geom_boxplot() +
+  scale_fill_manual(values = colors.actor, name = "Attacker") + 
+  ggtitle("Evasion rates vs Points for mutants") +
+  xlab("Point deciles") + 
+  ylab("Total evasion rate") +
+  scale_y_continuous(labels = percent)
+```
+
+```{r}
+ggplot(mutants, aes(x = points, y = evasion_rate)) +
+  geom_point() + 
+  geom_smooth(formula = y ~x, method = loess) +
+  scale_y_continuous(limits = c(0,1), labels = percent, name = "Global evasion rate") + 
+  xlab("Points")
+```
+
 # Submission timelines
 
-TODO: Durch Anzahl Spieler teilen
+These plots show the average number of tests/mutants submitted per minute per game.
+
+We can see that LLM defenders submitted significantly more tests per minute than
+human defenders, showing that the cooldown period was configured to be too low.
+
+Submission rates for LLM defenders go down with time. It seems that the initial
+"test suite" tests require re-generation less often than the uniquely written tests.
 
 ```{r}
-tmp <- tests |>
-  mutate(seconds_since_gamestart = seconds_since_gamestart / 60) |>
-  rename(`Minutes since gamestart` = seconds_since_gamestart)
+timelineplot <- function(.data) {
+  .data |>
+  mutate(seconds_since_gamestart = floor(seconds_since_gamestart / 60)) |>
+    rename(`Minutes since gamestart` = seconds_since_gamestart) |>
+    mutate(
+      part = as.numeric(ifelse(llm_or_human == "LLM",
+                    1 / number_of_test_games[number_of_test_games$llm_or_human == "LLM","n"],
+                    1 / number_of_test_games[number_of_test_games$llm_or_human == "Human","n"]
+                    ))
+    ) |>
+    group_by(`Minutes since gamestart`, llm_or_human) |>
+    summarise(
+      part = sum(part)
+    ) |>
+  ggplot(aes(x = `Minutes since gamestart`, y = part, colour = llm_or_human)) +
+    geom_line()
+}
 
-ggplot(data = tmp, aes(x = `Minutes since gamestart`, colour = llm_or_human)) +
-  geom_freqpoly(binwidth = 1)
+tests |>
+  filter(!is_equivalence_test) |>
+  timelineplot() +
+  ylab("Test submissions per game and minute") +
+  scale_colour_manual(values = colors.actor, name = "Defender")
 ```
 
-
+Submission rates for mutants go down over time for both LLM and Human Attackers.
+Since LLM attacker attempt to submit a new mutant every 30 seconds, this must
+be related to higher rejection rates. A possible reason for that is the requirement
+of mutants to be unique, there will be more collisions later in the game.
 
 ```{r}
-par(mfrow = c(2,2))
-hist(
-  tests[tests$llm_or_human == "Human", "seconds_since_gamestart"],
-  breaks = 30,
-  main = "human test submission timeline",
-  xlab = "Seconds since game start"
-)
-hist(
-  tests[tests$llm_or_human == "LLM", "seconds_since_gamestart"],
-  breaks = 30,
-  main = "llm test submission timeline",
-  xlab = "Seconds since game start"
-)
-hist(
-  tests[mutants$llm_or_human == "Human", "seconds_since_gamestart"],
-  breaks = 30,
-  main = "human mutant submission timeline",
-  xlab = "Seconds since game start"
-)
-hist(
-  tests[mutants$llm_or_human == "LLM", "seconds_since_gamestart"],
-  breaks = 30,
-  main = "llm mutant submission timeline",
-  xlab = "Seconds since game start"
-)
+mutants |>
+  timelineplot() +
+  ylab("Mutant submissions per game and minute") +
+  scale_colour_manual(values = colors.actor, name = "Attacker")
 ```
-# llm messages until success
 
-llm players can try to fix their generated tests/mutants if they failed validation.
+# LLM messages until success
+
+LLM players can try to fix their generated tests/mutants if they failed validation.
 These plots show the number of successfully submitted tests/mutants per minute,
-grouped by the number of messages to the llm that were necessary for this submission.
+grouped by the number of messages to the LLM that were necessary for this submission.
 
 Some tests have no directly associated number of messages. Those tests were generated
 as part of the initial test suite and were successfully submitted on first try.
@@ -238,10 +290,11 @@ tmp <- tests[tests$llm_or_human == "LLM",] |>
 
 ggplot(data = tmp, aes(x = `Minutes since gamestart`, colour = number_of_messages)) +
   geom_freqpoly(binwidth = 1) + 
-  ylab("tests per minute") +
+  ylab("Tests per minute") +
   scale_colour_manual(name = "Number of messages", values = c("black", colors.quality))
   
 ```
+
 ```{r}
 tmp <- mutants[mutants$llm_or_human == "LLM", ] |>
   mutate(number_of_messages = factor(number_of_messages,
@@ -254,7 +307,7 @@ tmp <- mutants[mutants$llm_or_human == "LLM", ] |>
 
 ggplot(data = tmp, aes(x = `Minutes since gamestart`, colour = number_of_messages)) +
   geom_freqpoly(binwidth = 1) + 
-  ylab("mutants per minute") +
+  ylab("Mutants per minute") +
   scale_colour_manual(name = "Number of messages", values = c(colors.quality))
 ```
 
@@ -262,29 +315,27 @@ ggplot(data = tmp, aes(x = `Minutes since gamestart`, colour = number_of_message
 
 # Turing tests
 
-llm-generated tests are almost never confused for human-written tests,
+LLM-generated tests are almost never confused for human-written tests,
 but mutants are hardly distinguishable.
 
 ```{r}
-detach.dfs()
-test_players <- tests[tests$opponent_llm_or_human == "Human" & !duplicated(tests[,c("game_id", "author_nickname")]) & tests$is_equivalence_test == "NO", c("game_id", "author_nickname", "llm_or_human", "opponent_opinion_human_or_ai")]
-test_players <- test_players %>%
-  mutate(opponent_opinion_human_or_ai = factor(opponent_opinion_human_or_ai, levels = 1:5, labels = interpretation.opponent_opinion_human_or_ai))
+tmp <- tests |>
+  filter(opponent_llm_or_human == "Human", !is_equivalence_test) |>
+  group_by(game_id, author_nickname, opponent_opinion_human_or_ai, llm_or_human) |>
+  mutate(opponent_opinion_human_or_ai = factor(opponent_opinion_human_or_ai, levels = 1:5, labels = interpretation.opponent_opinion_human_or_ai)) |>
+  summarise(n = n())
 
-test_counts <- test_players %>% 
-  count(llm_or_human, opponent_opinion_human_or_ai)
-
-ggplot(data = test_counts, aes(x = llm_or_human, y = n, fill = opponent_opinion_human_or_ai)) + 
+ggplot(data = tmp, aes(x = llm_or_human, y = n, fill = opponent_opinion_human_or_ai)) + 
   geom_col(position = "fill", name = "Proportion") +
   scale_fill_manual(name = "Attacker's guess", values = colors.opinion) +
   xlab("Defender") +
   ylab("Proportion") +
-  ggtitle("Defender Turing test")
+  ggtitle("Defender Turing test") + 
+  scale_y_continuous(labels = percent)
 
 ```
 
 ```{r}
-detach.dfs()
 mutant_players <- mutants[mutants$opponent_llm_or_human == "Human" & !duplicated(mutants[,c("game_id", "author_nickname")]), c("game_id", "author_nickname", "llm_or_human", "opponent_opinion_human_or_ai")]
 mutant_players <-mutant_players %>%
   mutate(opponent_opinion_human_or_ai = factor(opponent_opinion_human_or_ai, levels = 1:5, labels = interpretation.opponent_opinion_human_or_ai))
@@ -294,26 +345,27 @@ mutant_counts <-mutant_players %>%
 ggplot(data = mutant_counts, aes(x = llm_or_human, y = n, fill = opponent_opinion_human_or_ai)) + 
   geom_col(position = "fill", name = "Proportion") +
   scale_fill_manual(name = "Defender's guess", values = colors.opinion) +
+  scale_y_continuous(labels = percent) +
   xlab("Attacker") +
   ylab("Proportion") + 
   ggtitle("Attacker Turing test")
 rm(mutant_counts)
 ```
-# stillborn mutants
+# Stillborn mutants
 
 A stillborn mutant is a mutant that was killed by a test that was already in the game.
 
 ## Proportions
 This plot shows the proportions of stillborn mutants within a population.
-We can see that llm-generated mutants are more likely to be stillborn than
+We can see that LLM-generated mutants are more likely to be stillborn than
 human-written mutants, and that mutants are much more likely to be killed
-on submission when playing against an llm player compared to a human player.
+on submission when playing against an LLM player compared to a human player.
 
-This last point can possibly be explained by the fact that llm defenders first 
+This last point can possibly be explained by the fact that LLM defenders first 
 generate a complete test suite before writing individual tests.
 
 ```{r}
-stillborn_averages <- mutants %>%
+tmp <- mutants %>%
   group_by(llm_or_human, opponent_llm_or_human) %>%
   summarise(
     stillborn = mean(stillborn)
@@ -322,7 +374,7 @@ stillborn_averages <- mutants %>%
     stillborn = round(stillborn, digits = 3)
   )
 
-ggplot(data=stillborn_averages, aes(x = llm_or_human, y = stillborn, fill = opponent_llm_or_human)) +
+ggplot(data=tmp, aes(x = llm_or_human, y = stillborn, fill = opponent_llm_or_human)) +
   geom_col(position = "dodge") +
   geom_text(
     aes(label = percent(stillborn)), 
@@ -335,7 +387,6 @@ ggplot(data=stillborn_averages, aes(x = llm_or_human, y = stillborn, fill = oppo
   ggtitle("Percentages of stillborn mutants") +
   scale_y_continuous(labels = percent)
 
-rm(stillborn_averages)
 ```
 There are, however, only very slight differences in total evasion rates
 between stillborn and not-stillborn mutants.
@@ -345,8 +396,8 @@ ggplot(data = mutants, aes(x = stillborn, y = evasion_rate, fill = llm_or_human)
   geom_boxplot(position = "dodge") +
   scale_fill_manual(name = "Attacker", values = colors.actor) +
   scale_y_continuous(labels = percent, name = "Evasion rate") +
-  scale_x_discrete(labels = c("Not stillborn", "stillborn"),) +
-  xlab(NULL)
+  scale_x_discrete(labels = c("Not stillborn", "Stillborn"),) +
+  xlab(NULL) +
   ggtitle("Total evasion rates of stillborn and not-stillborn mutants")
 ```
 
@@ -356,8 +407,24 @@ ggplot(data = mutants, aes(x = stillborn, y = evasion_rate, fill = llm_or_human)
 The following plots show the percentage of mutants that could not be killed by any test
 in the entire study among their respective population.
 
-We can see that at least 35%-40% of mutants that were accepted as equivalent
-were actually killable by other tests in the study. Humans were only slightly
+For the purpose of this analysis, we assume that all mutants that could not be killed
+by any test in the study are actually equivalent. 
+
+We can see that at least 20% of human-written mutants that were declared as equivalent
+after being claimed as equivalent by another human were actually killable. 
+
+In contrast, at least 57% of LLM-written tests that 
+were accepted as equivalent after being claimed as equivalent by a human were
+killable. 
+
+In LLM-vs-LLM-games, almost every equivalent test was marked as equivalent.
+This is because in LLM-vs-LLM games, after the normal time ends, players
+stop the normal test/mutant submission, the defender claims every surviving
+mutant as equivalent, and the attacker is given the opportunity to defend
+against that. This procedure was chosen because without it, many equivalent
+tests with just shy of 10 points would in total provide a massive point 
+advantage to the attacker. LLM-vs-LLM games are therefore not comparable to the
+other combinations.
 ```{r}
 
 tmp <- mutants |>
@@ -383,10 +450,9 @@ ggplot(
     vjust = -0.4
     ), position = position_dodge(0.9)) +
   facet_wrap( ~ opponent_llm_or_human,) + 
-  scale_y_continuous(labels = percent, name = "Mutants not killed by any test") + 
-  scale_x_discrete(labels = c("Not declared equivalent", "Declared equivalent")) +
+  scale_y_continuous(labels = percent, name = "Equivalent mutants") + 
+  scale_x_discrete(labels = c("Not declared\n equivalent", "Declared equivalent")) +
   scale_fill_manual(name = "Attacker", values = colors.actor) +
-  ggtitle("Equivalent mutants") + 
   xlab(NULL)
 
   
@@ -416,7 +482,7 @@ ggplot(
     ), position = position_dodge(0.9)) +
   facet_wrap( ~ opponent_llm_or_human,) + 
   scale_y_continuous(labels = percent, name = "Mutants declared as equivalent") + 
-  scale_x_discrete(labels = c("Not killed by any test", "Killed at least once")) +
+  scale_x_discrete(labels = c("Equivalent", "Not equivalent")) +
   scale_fill_manual(name = "Attacker", values = colors.actor) +
   ggtitle("Equivalent mutants") + 
   xlab(NULL)
