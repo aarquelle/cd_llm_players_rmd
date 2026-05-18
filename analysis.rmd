@@ -11,12 +11,16 @@ knitr::opts_chunk$set(echo = F)
 ```
 
 ```{r}
+rm(list = ls())
 library(ggplot2)
 library(dplyr)
 library(viridisLite)
 library(tidyr)
 library(scales)
 getwd()
+
+source("scripts/create_killmap_data.R")
+
 detach.dfs <- function() {
   for (p in search()) {
     if (grepl("tests|mutants", p)) {
@@ -122,7 +126,9 @@ number_of_mutant_games <- mutants |>
     n = n_distinct(game_id)
   )
 
-deftests <- tests |> filter(!is_equivalence_test)
+deftests <- tests |> 
+  filter(!is_equivalence_test) |>
+  killmap_data(mutants)
 ```
 
 # Killrates
@@ -163,6 +169,44 @@ deftests |>
     scale_fill_manual(name = "Attacker", values = colors.actor) +
     facet_wrap( ~ kill_rate_type)
 ```
+
+## Finding new mutants
+How successful are tests in finding mutants that have previously been undetected?
+This counts the absolute number of mutants, so there are no percentages.
+
+Most tests only directly kill 0 or 1 mutants.
+
+```{r}
+deftests |>
+  ggplot(aes(x = llm_or_human, y = fresh_killed_mutants, fill = opponent_llm_or_human)) +
+  geom_boxplot() +
+  xlab("Defender") + 
+  ylab("Number of killed mutants") +
+  scale_fill_manual(values = colors.actor, name = "Attacker")
+
+```
+
+Comparing averages shows clearer results. For both classes, human-written
+tests kill more hitherto surviving mutants. Tests also have kill more new
+LLM-written mutants.
+
+Possible explanations for this: Human defenders write fewer tests than LLM 
+defenders, so every test has more mutants available to kill.
+
+```{r}
+deftests |>
+  #group_by(llm_or_human, opponent_llm_or_human) |>
+  summarise(fresh_killed_mutants = mean(fresh_killed_mutants), .by = c(llm_or_human, opponent_llm_or_human, cut)) |>
+  ggplot(aes(x = llm_or_human, y = fresh_killed_mutants, fill = opponent_llm_or_human)) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = round(fresh_killed_mutants, digits = 2)), position = position_dodge(0.9), vjust = 1.5) +
+  scale_fill_manual(values = colors.actor, name = "Attacker") +
+  ylab("Number of fresh mutant kills") +
+  xlab("Defender") +
+  facet_wrap( ~ cut)
+```
+
+
 
 # Evasion rate
 
@@ -755,6 +799,9 @@ This difference could be the effect of a unique mechanic of LLM-vs-LLM games,
 where all surviving mutants are claimed as equivalent. As seen above, LLM
 attackers are much more likely to fail to prove that a mutant is not equivalent,
 resulting in many more lost points due to lost equivalence duels.
+
+(Defender winrates and attacker winrates are essentially the same data,
+reversed. There is not a single draw in the data set.) 
 
 ```{r}
 games <- attacker_games |>
