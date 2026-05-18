@@ -717,6 +717,12 @@ attacker_games <- mutants |>
     points = sum(points)
   )
 ```
+## Total points
+
+These plots show the total number of points players earned in a game.
+There is no strong pattern except that defenders tend to earn more points
+against LLM attackers than against human attackers, while attackers tend
+to earn more points against human defenders than against LLM defenders.
 
 ```{r}
 defender_games |>
@@ -725,18 +731,81 @@ defender_games |>
   scale_fill_manual(name = "Attacker", values = colors.actor) +
   ylab("Points") +
   xlab("Defender") +
-  ggtitle("Defender games")
+  ggtitle("Defender games") + 
+  facet_wrap( ~ cut)
 ```
 
 ```{r}
 attacker_games |>
   ggplot(aes(y = points, x = llm_or_human, fill = opponent_llm_or_human)) +
-  geom_boxplot() +
+  geom_boxplot(position = position_dodge(0.9)) +
   scale_fill_manual(name = "Defender", values = colors.actor) +
   ylab("Points") +
   xlab("Attacker") +
-  ggtitle("Attacker games")
+  ggtitle("Attacker games") +
+  facet_wrap( ~ cut)
 ```
 
+## Winrates
 
+Generally, attackers have a very high win rate, at about 80%. The only exception
+is in LLM-vs-LLM games, where it falls down to just 22%. 
+
+This difference could be the effect of a unique mechanic of LLM-vs-LLM games,
+where all surviving mutants are claimed as equivalent. As seen above, LLM
+attackers are much more likely to fail to prove that a mutant is not equivalent,
+resulting in many more lost points due to lost equivalence duels.
+
+```{r}
+games <- attacker_games |>
+  inner_join(defender_games, join_by(game_id, cut, experiment_round), suffix = c(".attacker", ".defender"))|>
+  select(!starts_with("opponent"))
+
+games |>
+  group_by(llm_or_human.attacker, llm_or_human.defender) |>
+  summarise(
+    defender_winrate = mean(points.defender > points.attacker)
+    ) |>
+  ggplot(aes(x = llm_or_human.defender, fill = llm_or_human.attacker, 
+             y = defender_winrate, label = percent(defender_winrate))) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = colors.actor, name = "Attacker") + 
+  xlab("Defender") +
+  ggtitle("Defender winrates") +
+  scale_y_continuous(labels = percent, name = "Defender winrate") +
+  geom_text(position = position_dodge(0.9), vjust = 1.5)
+```
+
+```{r}
+games |>
+  group_by(llm_or_human.attacker, llm_or_human.defender) |>
+  summarise(
+    attacker_winrate = mean(points.defender < points.attacker)
+    ) |>
+  ggplot(aes(x = llm_or_human.attacker, fill = llm_or_human.defender, 
+             y = attacker_winrate, label = percent(attacker_winrate))) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = colors.actor, name = "Defender") + 
+  xlab("Attacker") +
+  ggtitle("Attacker winrates") +
+  scale_y_continuous(labels = percent, name = "Attacker winrate") +
+  geom_text(position = position_dodge(0.9), vjust = 1.5)
+```
+
+# Point ratios
+
+Win/Lose is a binary value that doesn't show the degree to which a player has
+won or lost. For this, we will look at the ratio of defender points vs attacker
+points.
+
+```{r}
+games |>
+  group_by(llm_or_human.attacker, llm_or_human.defender) |>
+  mutate(point_ratio = points.defender / ifelse(points.attacker != 0, points.attacker, 1)) |>
+  ggplot(aes(x = llm_or_human.defender, fill = llm_or_human.attacker, y = point_ratio)) +
+  geom_boxplot() +
+  scale_fill_manual(values = colors.actor, name = "Attacker") +
+  xlab("Defender") +
+  ylab("Defender points / attacker points")
+```
 
