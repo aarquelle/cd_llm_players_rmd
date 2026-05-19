@@ -1,12 +1,15 @@
 ---
 title: "Stats for llm-Players"
 output:
-  html_notebook: default
   pdf_document: default
+  html_notebook: default
+editor_options: 
+  chunk_output_type: console
 ---
 # Setup
 
 ```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 knitr::opts_chunk$set(echo = F)
 ```
 
@@ -54,8 +57,8 @@ levels.cut <- c(
 common_variables <- function(.data) {
   mutate(
     .data,
-    llm_or_human = factor(llm_or_human, levels = c("LLM", "Human")),
-    opponent_llm_or_human = factor(opponent_llm_or_human, levels = c("LLM", "Human")),
+    #llm_or_human = factor(llm_or_human, levels = c("LLM", "Human")),
+    #opponent_llm_or_human = factor(opponent_llm_or_human, levels = c("LLM", "Human")),
     cut = factor(cut, levels = levels.cut),
     author_degree = factor(author_degree, levels = levels.degree),
     opponent_degree = factor(opponent_degree, levels = levels.degree),
@@ -78,6 +81,8 @@ common_variables <- function(.data) {
 tests <- read.csv("test_data.csv") |>
   common_variables() |>
   mutate(
+    llm_or_human = factor(llm_or_human, levels = c("LLM", "Human"), labels = c("LLM Defender", "Human Defender")),
+    opponent_llm_or_human = factor(opponent_llm_or_human, levels = c("LLM", "Human"), labels = c("LLM Attacker", "Human Attacker")),
     is_equivalence_test = is_equivalence_test == "YES",
     kill_rate = (human_mutants_killed + llm_mutants_killed) / (human_mutants_killed + human_mutants_ignored + llm_mutants_killed + llm_mutants_ignored) |>
       replace_na(0),
@@ -94,6 +99,8 @@ tests <- read.csv("test_data.csv") |>
 mutants <- read.csv("mutant_data.csv") |>
   common_variables() |>
   mutate(
+    llm_or_human = factor(llm_or_human, levels = c("LLM", "Human"), labels = c("LLM Attacker", "Human Attacker")),
+    opponent_llm_or_human = factor(opponent_llm_or_human, levels = c("LLM", "Human"), labels = c("LLM Defender", "Human Defender")),
     stillborn = stillborn == "YES",
     survived = survived == "YES",
     declared_equivalent = declared_equivalent == "YES",
@@ -195,7 +202,6 @@ defenders, so every test has more mutants available to kill.
 
 ```{r}
 deftests |>
-  #group_by(llm_or_human, opponent_llm_or_human) |>
   summarise(fresh_killed_mutants = mean(fresh_killed_mutants), .by = c(llm_or_human, opponent_llm_or_human, cut)) |>
   ggplot(aes(x = llm_or_human, y = fresh_killed_mutants, fill = opponent_llm_or_human)) +
   geom_col(position = "dodge") +
@@ -726,7 +732,55 @@ mutants |>
   facet_wrap( ~ cut)
 ```
 ## Which lines were covered and mutated?
-TODO
+
+TODO: Normalise for per-game averages, compare mutations and coverage
+in the same plot
+```{r}
+
+coverage_plot <- function(.data, lines_variable_name) {
+  .data |>
+    rename(.lines = {{lines_variable_name}}) |>
+    select(id, llm_or_human, opponent_llm_or_human, .lines) |>
+    separate_longer_delim(.lines, delim=",") |>
+    group_by(llm_or_human, opponent_llm_or_human, .lines) |>
+    summarise(n = n() ) |>
+    ungroup() |>
+    mutate(.lines = as.numeric(.lines)) |>
+    ggplot(aes(x = .lines, y = n)) +
+    geom_col() +
+    facet_grid(llm_or_human ~ opponent_llm_or_human) +
+    scale_y_continuous()
+}
+
+deftests |>
+  filter(cut == "CharRange") |>
+  coverage_plot(lines_covered) +
+  ggtitle("Coverage for CharRange")
+```
+
+```{r}
+deftests |>
+  filter(cut == "ByteVector") |>
+  coverage_plot(lines_covered) +
+  ggtitle("Coverage for ByteVector")
+```
+
+```{r}
+mutants |>
+  filter(cut == "CharRange") |>
+  coverage_plot(mutated_lines) +
+  ggtitle("Mutations for CharRange")
+```
+
+```{r}
+mutants |>
+  filter(cut == "ByteVector") |>
+  coverage_plot(mutated_lines) +
+  ggtitle("Mutations for CharRange")
+```
+
+
+
 
 # Game statistics
 The following statistics are about entire games, not about individual tests
@@ -855,4 +909,9 @@ games |>
   xlab("Defender") +
   ylab("Defender points / attacker points")
 ```
+
+```{r}
+tests
+```
+
 

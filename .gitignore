@@ -50,3 +50,4 @@ rsconnect/
 
 # Compiled notebook files
 *.nb.html
+*.pdf
