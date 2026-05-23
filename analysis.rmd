@@ -4,7 +4,7 @@ output:
   pdf_document: default
   html_notebook: default
 editor_options: 
-  chunk_output_type: console
+  chunk_output_type: inline
 ---
 # Setup
 
@@ -22,15 +22,7 @@ library(tidyr)
 library(scales)
 getwd()
 
-source("scripts/create_killmap_data.R")
-
-detach.dfs <- function() {
-  for (p in search()) {
-    if (grepl("tests|mutants", p)) {
-      detach(p, character.only = TRUE)
-    }
-  }
-}
+source("scripts/load_data.R")
 
 colors.opinion <- c("red", "orange", "grey", "cyan", "blue")
 colors.actor <- c("turquoise3", "thistle4")
@@ -78,28 +70,28 @@ common_variables <- function(.data) {
 ```
 
 ```{r}
-tests <- read.csv("test_data.csv") |>
+#tests <- read.csv("test_data.csv") |>
+#  common_variables() |>
+#  mutate(
+#    llm_or_human = factor(llm_or_human, levels = c("LLM", "Human"), labels = c("LLM Defender", "Human #Defender")),
+#    opponent_llm_or_human = factor(opponent_llm_or_human, levels = c("LLM", "Human"), labels = c("LLM Attacker", #"Human Attacker")),
+#    is_equivalence_test = is_equivalence_test == "YES",
+#    kill_rate = (human_mutants_killed + llm_mutants_killed) / (human_mutants_killed + human_mutants_ignored + #llm_mutants_killed + llm_mutants_ignored) |>
+#      replace_na(0),
+#    human_kill_rate = (human_mutants_killed / (human_mutants_killed + human_mutants_ignored)) |>
+#      replace_na(0),
+#    llm_kill_rate = (llm_mutants_killed / (llm_mutants_killed + llm_mutants_ignored)) |>
+#      replace_na(0),
+#    existing_kill_rate = (existing_mutants_killed / (existing_mutants_killed + existing_mutants_ignored)) |>
+#      replace_na(0),
+#    future_kill_rate = (future_mutants_killed / (future_mutants_killed + future_mutants_ignored)) |>
+#      replace_na(0),
+#  )
+#
+old_mutants <- read.csv("mutant_data.csv") |>
   common_variables() |>
   mutate(
-    llm_or_human = factor(llm_or_human, levels = c("LLM", "Human"), labels = c("LLM Defender", "Human Defender")),
-    opponent_llm_or_human = factor(opponent_llm_or_human, levels = c("LLM", "Human"), labels = c("LLM Attacker", "Human Attacker")),
-    is_equivalence_test = is_equivalence_test == "YES",
-    kill_rate = (human_mutants_killed + llm_mutants_killed) / (human_mutants_killed + human_mutants_ignored + llm_mutants_killed + llm_mutants_ignored) |>
-      replace_na(0),
-    human_kill_rate = (human_mutants_killed / (human_mutants_killed + human_mutants_ignored)) |>
-      replace_na(0),
-    llm_kill_rate = (llm_mutants_killed / (llm_mutants_killed + llm_mutants_ignored)) |>
-      replace_na(0),
-    existing_kill_rate = (existing_mutants_killed / (existing_mutants_killed + existing_mutants_ignored)) |>
-      replace_na(0),
-    future_kill_rate = (future_mutants_killed / (future_mutants_killed + future_mutants_ignored)) |>
-      replace_na(0),
-  )
-
-mutants <- read.csv("mutant_data.csv") |>
-  common_variables() |>
-  mutate(
-    llm_or_human = factor(llm_or_human, levels = c("LLM", "Human"), labels = c("LLM Attacker", "Human Attacker")),
+    llm_or_human = factor(llm_or_human, levels = c("LLM", "Human"), labels = c("LLM Attacker", "Human #Attacker")),
     opponent_llm_or_human = factor(opponent_llm_or_human, levels = c("LLM", "Human"), labels = c("LLM Defender", "Human Defender")),
     stillborn = stillborn == "YES",
     survived = survived == "YES",
@@ -134,8 +126,7 @@ number_of_mutant_games <- mutants |>
   )
 
 deftests <- tests |> 
-  filter(!is_equivalence_test) |>
-  killmap_data(mutants)
+  filter(!is_equivalence_test, !fails_against_cut)
 ```
 
 # Killrates
@@ -502,7 +493,7 @@ but mutants are hardly distinguishable.
 ```{r}
 deftests |>
   filter(opponent_llm_or_human == "Human") |>
-  group_by(game_id, author_nickname, opponent_opinion_human_or_ai, llm_or_human) |>
+  group_by(game_id, username, opponent_opinion_human_or_ai, llm_or_human) |>
   mutate(opponent_opinion_human_or_ai = factor(opponent_opinion_human_or_ai, levels = 1:5, labels = interpretation.opponent_opinion_human_or_ai)) |>
   summarise(n = n()) |>
   ggplot(aes(x = llm_or_human, y = n, fill = opponent_opinion_human_or_ai)) + 
@@ -518,7 +509,7 @@ deftests |>
 ```{r}
 mutants |>
   filter(opponent_llm_or_human == "Human") |>
-  group_by(game_id, author_nickname, opponent_opinion_human_or_ai, llm_or_human) |>
+  group_by(game_id, username, opponent_opinion_human_or_ai, llm_or_human) |>
   mutate(opponent_opinion_human_or_ai = factor(opponent_opinion_human_or_ai, levels = 1:5, labels = interpretation.opponent_opinion_human_or_ai)) |>
   summarise(n = n()) |>
   ggplot(aes(x = llm_or_human, y = n, fill = opponent_opinion_human_or_ai)) + 
@@ -546,7 +537,7 @@ generate a complete test suite before writing individual tests.
 mutants |>
   group_by(llm_or_human, opponent_llm_or_human) |>
   summarise(
-    stillborn = mean(stillborn)
+    stillborn = mean(is_stillborn)
   ) |>
   ggplot(aes(x = llm_or_human, y = stillborn, fill = opponent_llm_or_human)) +
     geom_col(position = "dodge") +
@@ -566,7 +557,7 @@ There are, however, only very slight differences in total evasion rates
 between stillborn and not-stillborn mutants.
 
 ```{r}
-ggplot(data = mutants, aes(x = stillborn, y = evasion_rate, fill = llm_or_human)) +
+ggplot(data = mutants, aes(x = is_stillborn, y = evasion_rate, fill = llm_or_human)) +
   geom_boxplot(position = "dodge") +
   scale_fill_manual(name = "Attacker", values = colors.actor) +
   scale_y_continuous(labels = percent, name = "Evasion rate") +
@@ -681,7 +672,7 @@ mutants |>
 ```
 ```{r}
 mutants |>
-  filter(!stillborn) |>
+  filter(!is_stillborn) |>
   group_by(llm_or_human, opponent_llm_or_human) |>
   summarise(`Survival rate` = mean(survived)) |>
   ggplot(aes(y = `Survival rate`, x = llm_or_human, fill = opponent_llm_or_human)) +
@@ -740,7 +731,7 @@ in the same plot
 coverage_plot <- function(.data, lines_variable_name) {
   .data |>
     rename(.lines = {{lines_variable_name}}) |>
-    select(id, llm_or_human, opponent_llm_or_human, .lines) |>
+    select(llm_or_human, opponent_llm_or_human, .lines) |>
     separate_longer_delim(.lines, delim=",") |>
     group_by(llm_or_human, opponent_llm_or_human, .lines) |>
     summarise(n = n() ) |>
@@ -768,14 +759,14 @@ deftests |>
 ```{r}
 mutants |>
   filter(cut == "CharRange") |>
-  coverage_plot(mutated_lines) +
+  coverage_plot(mutatedlines) +
   ggtitle("Mutations for CharRange")
 ```
 
 ```{r}
 mutants |>
   filter(cut == "ByteVector") |>
-  coverage_plot(mutated_lines) +
+  coverage_plot(mutatedlines) +
   ggtitle("Mutations for CharRange")
 ```
 
@@ -790,12 +781,12 @@ and mutants.
 defender_games <- deftests |>
   group_by(
     game_id, 
-    author_nickname, 
+    username, 
     across(starts_with("author_")), 
     across(starts_with("opponent_")),
     llm_or_human,
     cut,
-    experiment_round
+    round
     ) |>
   summarise(
     points = sum(points)
@@ -804,12 +795,12 @@ defender_games <- deftests |>
 attacker_games <- mutants |>
   group_by(
     game_id, 
-    author_nickname, 
+    username, 
     across(starts_with("author_")), 
     across(starts_with("opponent_")),
     llm_or_human,
     cut,
-    experiment_round
+    round
     ) |>
   summarise(
     points = sum(points)
@@ -859,7 +850,7 @@ reversed. There is not a single draw in the data set.)
 
 ```{r}
 games <- attacker_games |>
-  inner_join(defender_games, join_by(game_id, cut, experiment_round), suffix = c(".attacker", ".defender"))|>
+  inner_join(defender_games, join_by(game_id, cut, round), suffix = c(".attacker", ".defender"))|>
   select(!starts_with("opponent"))
 
 games |>
@@ -910,8 +901,73 @@ games |>
   ylab("Defender points / attacker points")
 ```
 
+
+
 ```{r}
-tests
+interpretation.opponent_opinion_human_or_ai <- as.factor(c(
+  "Definitely human",
+  "Probably human",
+  "Don't know",
+  "Probably ai",
+  "Definitely ai"
+))
+
+levels.degree <- c(
+  "Bachelor Informatik", 
+  "Bachelor Internet Computing", 
+  "Lehramt Informatik",
+  "Artificial Intelligence")
+levels.cut <- c(
+  "ByteVector",
+  "CharRange"
+)
+
+common_variables <- function(.data) {
+  mutate(
+    .data,
+    #llm_or_human = factor(llm_or_human, levels = c("LLM", "Human")),
+    #opponent_llm_or_human = factor(opponent_llm_or_human, levels = c("LLM", "Human")),
+    cut = factor(cut, levels = levels.cut),
+    author_degree = factor(author_degree, levels = levels.degree),
+    opponent_degree = factor(opponent_degree, levels = levels.degree),
+    experiment_round = factor(experiment_round),
+    author_opinion_judged_programming_skill = factor(author_opinion_judged_programming_skill),
+    author_opinion_judged_original = factor(author_opinion_judged_original),
+    author_opinion_challenged = factor(author_opinion_challenged),
+    author_opinion_fun = factor(author_opinion_fun),
+    author_opinion_human_or_ai = factor(author_opinion_human_or_ai),
+    opponent_opinion_judged_programming_skill = factor(opponent_opinion_judged_programming_skill),
+    opponent_opinion_judged_original = factor(opponent_opinion_judged_original),
+    opponent_opinion_challenged = factor(opponent_opinion_challenged),
+    opponent_opinion_fun = factor(opponent_opinion_fun),
+    opponent_opinion_human_or_ai = factor(opponent_opinion_human_or_ai),
+  )
+}
+
+old_mutants <- read.csv("mutant_data.csv") |>
+  common_variables() |>
+  mutate(
+    llm_or_human = factor(llm_or_human, levels = c("LLM", "Human"), labels = c("LLM Attacker", "Human #Attacker")),
+    opponent_llm_or_human = factor(opponent_llm_or_human, levels = c("LLM", "Human"), labels = c("LLM Defender", "Human Defender")),
+    stillborn = stillborn == "YES",
+    survived = survived == "YES",
+    declared_equivalent = declared_equivalent == "YES",
+    has_been_killed = human_tests_killed_by + llm_tests_killed_by > 0,
+    
+    evasion_rate = (human_tests_survived + llm_tests_survived) / (human_tests_survived + human_tests_killed_by + llm_tests_survived + llm_tests_killed_by) |>
+      replace_na(0),
+    human_evasion_rate = (human_tests_survived / (human_tests_survived + human_tests_killed_by)) |>
+      replace_na(0),
+    llm_evasion_rate = (llm_tests_survived / (llm_tests_survived + llm_tests_killed_by)) |>
+      replace_na(0),
+    existing_evasion_rate = (existing_tests_survived / (existing_tests_survived + existing_tests_killed_by)) |>
+      replace_na(0),
+    future_evasion_rate = (future_tests_survived / (future_tests_survived + future_tests_killed_by)) |>
+      replace_na(0),
+  )
 ```
+```{r}
 
-
+```
+Problem: Es gibt sehr kleine Unterschiede in den Killmaps. Interessant könnte sein: Der 
+Ausreißer in "Number of killed mutants": In der neuen Version existiert er nicht. 

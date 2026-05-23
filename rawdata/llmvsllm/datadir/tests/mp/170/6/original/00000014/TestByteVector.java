@@ -1,0 +1,20 @@
+import org.junit.Test;
+
+import static org.junit.Assert.*;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.*;
+
+public class TestByteVector {
+    @Test(timeout = 4000)
+    public void test() throws Throwable {
+                f.setAccessible(true);
+        return f.getInt(v);
+        f.setAccessible(true);
+        return (byte[]) f.get(v);
+        ByteVector v = new ByteVector(1);
+        v.putByte(0xAB);
+
+        assertEquals(1, getLength(v));
+        assertArrayEquals(new byte[] { (byte) 0xAB }, new byte[] { getData(v)[0] });
+    }
+}

@@ -1,0 +1,10 @@
+User_ID,Username,Password,Email,Validated,Active,AllowContact,KeyMap,pw_reset_timestamp,pw_reset_secret,KeepPreviousTest
+-1,dummy_user,DUMMY_USER_INACCESSIBLE,user@dummy.com,0,1,0,DEFAULT,,,0
+1,Mutator,AI_ATTACKER_INACCESSIBLE,codedef_mutator@sheffield.ac.uk,0,1,0,DEFAULT,,,0
+2,TestGen,AI_DEFENDER_INACCESSIBLE,codedef_testgen@sheffield.ac.uk,0,1,0,DEFAULT,,,0
+3,System Attacker,DUMMY_ATTACKER_INACCESSIBLE,attacker@dummy.com,0,1,0,DEFAULT,,,0
+4,System Defender,DUMMY_DEFENDER_INACCESSIBLE,defender@dummy.com,0,1,0,DEFAULT,,,0
+5,AI_Attacker,AI_ATTACKER_INACCESSIBLE,aiattacker@dummy.com,0,1,0,DEFAULT,,,0
+6,AI_Defender,AI_DEFENDER_INACCESSIBLE,aidefender@dummy.com,0,1,0,DEFAULT,,,0
+7,AI_PLAYER,AI_PLAYER_INACCESSIBLE,aiplayer@dummy.com,0,1,0,DEFAULT,,,0
+103,admin,$2a$10$TsMCJLZ2WyvaIsQIA/0WCOOET76wgRuGhY4hPrM1LL74EZ0kwGHnO,admin@admin.admin,0,1,0,DEFAULT,,,0

@@ -1,0 +1,16 @@
+import org.junit.Test;
+
+import static org.junit.Assert.*;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.*;
+
+public class TestByteVector {
+    @Test(timeout = 4000)
+    public void test() throws Throwable {
+        ByteVector bv = new ByteVector();
+// U+20AC => E2 82 AC
+bv.putUTF8("\u20AC");
+assertEquals(5, bv.length);
+assertArrayEquals(new byte[] { 0x00, 0x03, (byte) 0xE2, (byte) 0x82, (byte) 0xAC }, Arrays.copyOf(bv.data, bv.length));
+    }
+}

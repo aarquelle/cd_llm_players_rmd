@@ -1,0 +1,5 @@
+model_name,type,defender_dependencies,defender_method_focus,attacker_dependencies,active
+DEFAULT_MODEL,DEFAULT,1,1,1,0
+gpt-4.1-nano,OPENAI,,,,
+gpt-5-nano,OPENAI,,,,
+gpt-5.2,OPENAI,,,,1

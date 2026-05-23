@@ -1,0 +1,15 @@
+import org.junit.Test;
+
+import static org.junit.Assert.*;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.*;
+
+public class TestByteVector {
+    @Test(timeout = 4000)
+    public void test() throws Throwable {
+                ByteVector bv = new ByteVector();
+        bv.putUTF8("\u0100"); // U+0100 -> UTF-8: C4 80, length prefix: 00 02
+        assertEquals(4, bv.length);
+        assertEquals((byte) 0xC4, bv.data[2]);
+    }
+}

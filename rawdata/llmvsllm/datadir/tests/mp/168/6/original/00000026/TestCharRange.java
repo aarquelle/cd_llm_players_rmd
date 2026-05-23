@@ -1,0 +1,14 @@
+import org.junit.Test;
+
+import static org.junit.Assert.*;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.*;
+
+public class TestCharRange {
+    @Test(timeout = 4000)
+    public void test() throws Throwable {
+        CharRange r = CharRange.isIn('a', 'e');
+assertFalse(r.equals("a-e"));
+assertTrue(r.equals(CharRange.isIn('a', 'e')));
+    }
+}
