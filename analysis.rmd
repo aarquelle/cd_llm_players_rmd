@@ -35,80 +35,9 @@ interpretation.opponent_opinion_human_or_ai <- as.factor(c(
   "Probably ai",
   "Definitely ai"
 ))
-
-levels.degree <- c(
-  "Bachelor Informatik", 
-  "Bachelor Internet Computing", 
-  "Lehramt Informatik",
-  "Artificial Intelligence")
-levels.cut <- c(
-  "ByteVector",
-  "CharRange"
-)
-
-common_variables <- function(.data) {
-  mutate(
-    .data,
-    #llm_or_human = factor(llm_or_human, levels = c("LLM", "Human")),
-    #opponent_llm_or_human = factor(opponent_llm_or_human, levels = c("LLM", "Human")),
-    cut = factor(cut, levels = levels.cut),
-    author_degree = factor(author_degree, levels = levels.degree),
-    opponent_degree = factor(opponent_degree, levels = levels.degree),
-    experiment_round = factor(experiment_round),
-    author_opinion_judged_programming_skill = factor(author_opinion_judged_programming_skill),
-    author_opinion_judged_original = factor(author_opinion_judged_original),
-    author_opinion_challenged = factor(author_opinion_challenged),
-    author_opinion_fun = factor(author_opinion_fun),
-    author_opinion_human_or_ai = factor(author_opinion_human_or_ai),
-    opponent_opinion_judged_programming_skill = factor(opponent_opinion_judged_programming_skill),
-    opponent_opinion_judged_original = factor(opponent_opinion_judged_original),
-    opponent_opinion_challenged = factor(opponent_opinion_challenged),
-    opponent_opinion_fun = factor(opponent_opinion_fun),
-    opponent_opinion_human_or_ai = factor(opponent_opinion_human_or_ai),
-  )
-}
 ```
 
 ```{r}
-#tests <- read.csv("test_data.csv") |>
-#  common_variables() |>
-#  mutate(
-#    llm_or_human = factor(llm_or_human, levels = c("LLM", "Human"), labels = c("LLM Defender", "Human #Defender")),
-#    opponent_llm_or_human = factor(opponent_llm_or_human, levels = c("LLM", "Human"), labels = c("LLM Attacker", #"Human Attacker")),
-#    is_equivalence_test = is_equivalence_test == "YES",
-#    kill_rate = (human_mutants_killed + llm_mutants_killed) / (human_mutants_killed + human_mutants_ignored + #llm_mutants_killed + llm_mutants_ignored) |>
-#      replace_na(0),
-#    human_kill_rate = (human_mutants_killed / (human_mutants_killed + human_mutants_ignored)) |>
-#      replace_na(0),
-#    llm_kill_rate = (llm_mutants_killed / (llm_mutants_killed + llm_mutants_ignored)) |>
-#      replace_na(0),
-#    existing_kill_rate = (existing_mutants_killed / (existing_mutants_killed + existing_mutants_ignored)) |>
-#      replace_na(0),
-#    future_kill_rate = (future_mutants_killed / (future_mutants_killed + future_mutants_ignored)) |>
-#      replace_na(0),
-#  )
-#
-old_mutants <- read.csv("mutant_data.csv") |>
-  common_variables() |>
-  mutate(
-    llm_or_human = factor(llm_or_human, levels = c("LLM", "Human"), labels = c("LLM Attacker", "Human #Attacker")),
-    opponent_llm_or_human = factor(opponent_llm_or_human, levels = c("LLM", "Human"), labels = c("LLM Defender", "Human Defender")),
-    stillborn = stillborn == "YES",
-    survived = survived == "YES",
-    declared_equivalent = declared_equivalent == "YES",
-    has_been_killed = human_tests_killed_by + llm_tests_killed_by > 0,
-    
-    evasion_rate = (human_tests_survived + llm_tests_survived) / (human_tests_survived + human_tests_killed_by + llm_tests_survived + llm_tests_killed_by) |>
-      replace_na(0),
-    human_evasion_rate = (human_tests_survived / (human_tests_survived + human_tests_killed_by)) |>
-      replace_na(0),
-    llm_evasion_rate = (llm_tests_survived / (llm_tests_survived + llm_tests_killed_by)) |>
-      replace_na(0),
-    existing_evasion_rate = (existing_tests_survived / (existing_tests_survived + existing_tests_killed_by)) |>
-      replace_na(0),
-    future_evasion_rate = (future_tests_survived / (future_tests_survived + future_tests_killed_by)) |>
-      replace_na(0),
-  )
   
 number_of_test_games <- tests[!tests$is_equivalence_test,] |>
   group_by(
@@ -884,7 +813,7 @@ games |>
   geom_text(position = position_dodge(0.9), vjust = 1.5)
 ```
 
-# Point ratios
+## Point ratios
 
 Win/Lose is a binary value that doesn't show the degree to which a player has
 won or lost. For this, we will look at the ratio of defender points vs attacker
@@ -903,71 +832,3 @@ games |>
 
 
 
-```{r}
-interpretation.opponent_opinion_human_or_ai <- as.factor(c(
-  "Definitely human",
-  "Probably human",
-  "Don't know",
-  "Probably ai",
-  "Definitely ai"
-))
-
-levels.degree <- c(
-  "Bachelor Informatik", 
-  "Bachelor Internet Computing", 
-  "Lehramt Informatik",
-  "Artificial Intelligence")
-levels.cut <- c(
-  "ByteVector",
-  "CharRange"
-)
-
-common_variables <- function(.data) {
-  mutate(
-    .data,
-    #llm_or_human = factor(llm_or_human, levels = c("LLM", "Human")),
-    #opponent_llm_or_human = factor(opponent_llm_or_human, levels = c("LLM", "Human")),
-    cut = factor(cut, levels = levels.cut),
-    author_degree = factor(author_degree, levels = levels.degree),
-    opponent_degree = factor(opponent_degree, levels = levels.degree),
-    experiment_round = factor(experiment_round),
-    author_opinion_judged_programming_skill = factor(author_opinion_judged_programming_skill),
-    author_opinion_judged_original = factor(author_opinion_judged_original),
-    author_opinion_challenged = factor(author_opinion_challenged),
-    author_opinion_fun = factor(author_opinion_fun),
-    author_opinion_human_or_ai = factor(author_opinion_human_or_ai),
-    opponent_opinion_judged_programming_skill = factor(opponent_opinion_judged_programming_skill),
-    opponent_opinion_judged_original = factor(opponent_opinion_judged_original),
-    opponent_opinion_challenged = factor(opponent_opinion_challenged),
-    opponent_opinion_fun = factor(opponent_opinion_fun),
-    opponent_opinion_human_or_ai = factor(opponent_opinion_human_or_ai),
-  )
-}
-
-old_mutants <- read.csv("mutant_data.csv") |>
-  common_variables() |>
-  mutate(
-    llm_or_human = factor(llm_or_human, levels = c("LLM", "Human"), labels = c("LLM Attacker", "Human #Attacker")),
-    opponent_llm_or_human = factor(opponent_llm_or_human, levels = c("LLM", "Human"), labels = c("LLM Defender", "Human Defender")),
-    stillborn = stillborn == "YES",
-    survived = survived == "YES",
-    declared_equivalent = declared_equivalent == "YES",
-    has_been_killed = human_tests_killed_by + llm_tests_killed_by > 0,
-    
-    evasion_rate = (human_tests_survived + llm_tests_survived) / (human_tests_survived + human_tests_killed_by + llm_tests_survived + llm_tests_killed_by) |>
-      replace_na(0),
-    human_evasion_rate = (human_tests_survived / (human_tests_survived + human_tests_killed_by)) |>
-      replace_na(0),
-    llm_evasion_rate = (llm_tests_survived / (llm_tests_survived + llm_tests_killed_by)) |>
-      replace_na(0),
-    existing_evasion_rate = (existing_tests_survived / (existing_tests_survived + existing_tests_killed_by)) |>
-      replace_na(0),
-    future_evasion_rate = (future_tests_survived / (future_tests_survived + future_tests_killed_by)) |>
-      replace_na(0),
-  )
-```
-```{r}
-
-```
-Problem: Es gibt sehr kleine Unterschiede in den Killmaps. Interessant könnte sein: Der 
-Ausreißer in "Number of killed mutants": In der neuen Version existiert er nicht. 

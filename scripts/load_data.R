@@ -58,7 +58,7 @@ load_tests <- function(study) {
     select(user_id, username) |>
     filter(user_id >= 5) |>
     mutate(
-      llm_or_human = factor(ifelse(user_id <= 6, "LLM", "Human"))
+      llm_or_human = factor(ifelse(user_id <= 6, "LLM", "Human"), levels = c("LLM", "Human"))
     )
   
   players <- readdbtable("players.csv") |>
@@ -176,7 +176,7 @@ load_mutants <- function(study) {
   users <- readdbtable("users.csv") |>
     select(user_id, username) |>
     filter(user_id >= 5) |>
-    mutate(llm_or_human = factor(ifelse(user_id <= 6, "LLM", "Human")))
+    mutate(llm_or_human = factor(ifelse(user_id <= 6, "LLM", "Human"), levels = c("LLM", "Human")))
   
   players <- readdbtable("players.csv") |>
     select(id, user_id, game_id, role) |>
@@ -251,10 +251,10 @@ killmap_data <- function(tests, mutants) {
     select(mutant_id, seconds_since_gamestart, game_id, llm_or_human) |>
     rename(mutant_seconds = seconds_since_gamestart, mutant_game_id = game_id, mutant_actor = llm_or_human)
   
-  canonical_killmaps <- read.csv("rawdata/killmaps/killmaps.csv", col.names = c("test_id", "mutant_id", "state")) |>
+  canonical_killmaps <- read.csv("rawdata/killmaps/killmaps.csv", header = FALSE, col.names = c("test_id", "mutant_id", "state")) |>
     mutate(state = factor(state))
-  test_mapping <- read.csv("rawdata/killmaps/dedup_test_mapping.csv", col.names = c("dup_test_id", "canonical_id"))
-  mutant_mapping <- read.csv("rawdata/killmaps/dedup_mutant_mapping.csv", col.names = c("dup_mutant_id", "canonical_id"))
+  test_mapping <- read.csv("rawdata/killmaps/dedup_test_mapping.csv", header = FALSE, col.names = c("dup_test_id", "canonical_id"))
+  mutant_mapping <- read.csv("rawdata/killmaps/dedup_mutant_mapping.csv", header = FALSE, col.names = c("dup_mutant_id", "canonical_id"))
   
   full_map <- test_mapping |>
     left_join(canonical_killmaps, join_by(canonical_id == test_id), relationship = "many-to-many") |>
