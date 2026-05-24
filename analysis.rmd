@@ -8,12 +8,12 @@ editor_options:
 ---
 # Setup
 
-```{r setup, include=FALSE}
+```{r knitr-setup, include=FALSE}
 knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 knitr::opts_chunk$set(echo = F)
 ```
 
-```{r}
+```{r data-setup, include=FALSE}
 rm(list = ls())
 library(ggplot2)
 library(dplyr)
@@ -28,6 +28,51 @@ colors.opinion <- c("red", "orange", "grey", "cyan", "blue")
 colors.actor <- c("turquoise3", "thistle4")
 colors.quality <- c("#458B00", "darkgoldenrod3", "#8B1C62", "red4")
 
+scale_defender <- scale_fill_manual(values = colors.actor, name = "Defender")
+scale_attacker <- scale_fill_manual(values = colors.actor, name = "Attacker")
+
+scale_percentage_bars <- function(dodge_value = 0.9, vjust = 1.5) {
+  list(
+  scale_y_continuous(labels = percent),
+  geom_col(position = "dodge"),
+  geom_text(
+    aes(label = percent(after_stat(y))),
+    position = position_dodge(dodge_value), 
+    vjust = vjust
+    )
+  )
+}
+
+# Groups by llm_or_mutant, opponent_llm_or_mutant and cut,
+scale_default_grouping <- function(type) {
+  if (! type %in% c("t", "m")) {
+    stop("type must be t or m")
+  }
+  list(
+    aes(x = llm_or_human, fill = opponent_llm_or_human),
+    scale_x_discrete(
+      name = ifelse(type == "t", "Defender", "Attacker")
+    ),
+    scale_fill_manual(
+      values = colors.actor, 
+      name = ifelse(type == "t", "Attacker", "Defender")
+    ),
+    facet_wrap( ~ cut)
+    
+  )
+}
+
+binary_mean_cols <- function(.data, y, type) {
+  .data |>
+    summarise(
+      {{y}} := mean({{y}}),
+      .by = c(llm_or_human, opponent_llm_or_human, cut)
+    ) |>
+    ggplot(aes(y = {{y}})) +
+    scale_default_grouping(type) +
+    scale_percentage_bars()
+}
+
 interpretation.opponent_opinion_human_or_ai <- as.factor(c(
   "Definitely human",
   "Probably human",
@@ -35,9 +80,6 @@ interpretation.opponent_opinion_human_or_ai <- as.factor(c(
   "Probably ai",
   "Definitely ai"
 ))
-```
-
-```{r}
   
 number_of_test_games <- tests[!tests$is_equivalence_test,] |>
   group_by(
@@ -831,4 +873,230 @@ games |>
 ```
 
 
+# Token costs
+
+
+The following plots show alternative visualizations for 
+input and output token costs for successfully generated
+tests/mutants. This only includes the costs of conversations that actually created
+a test/mutant.
+
+General takeaways:
+
+- Tokens costs are much lower for tests and mutants for the `CharRange` class
+(which has 216 loc) than for the `ByteVector` class (which has 261 loc).
+  - TODO: The difference in token usage seems to be much greater than what one would
+  expect based in the relatively small difference in loc. What else explains this?
+  Are longer methods selected for `ByteVector`?
+- For mutants in `ByteVector`, most input and output tokens fall in a clear pattern based 
+on number of messages. However, conversations with all number of messages fall
+into a spot with very few tokens. TODO Why?
+- For mutants `CharRange`, the pattern is much less clear, the number of messages
+seems to have a smaller impact on the total token usage. TODO Why?
+- Test generations shows smaller variations in token costs than mutant generation.
+TODO Quantify! Standard deviations?
+- TODO: Relationship between means in different "number of message" categories.
+At which factor do token costs increase with more messages? Important for 
+evaluation if the "conversation" approach is worth it compared to a fresh
+attempt at each failure.
+
+## Generating mutants
+
+### As boxplots:
+
+```{r}
+mutants |>
+  filter(llm_or_human == "LLM") |>
+  pivot_longer(
+    cols = c(input_tokens, output_tokens),
+    names_to = "token_type",
+    values_to = "token_count"
+  ) |>
+  mutate(
+    token_type = factor(token_type, levels = c("input_tokens", "output_tokens"), labels = c("Input", "Output"))
+  ) |>
+  ggplot(aes(x = token_type, y = token_count, fill = factor(number_of_messages))) +
+  geom_boxplot() + 
+  xlab("Token type") +
+  scale_fill_manual(values = colors.quality, name = "Number of messages") +
+  facet_wrap( ~ cut, nrow = 1) +
+  ylab("Token count") +
+  ggtitle("Token usage for LLM generated mutants")
+  
+```
+
+### As a histogram:
+
+#### Input tokens
+
+```{r}
+  
+mutants |>
+  ggplot(aes(x = input_tokens, fill = factor(number_of_messages))) +
+  geom_histogram(position = "stack", bincount = 20) +
+  scale_fill_discrete(name = "Number of messages") +
+  facet_wrap( ~ cut) +
+  xlab("Input tokens") + 
+  ylab("Count of conversations") +
+  ggtitle("Input tokens for mutant generation")
+  
+
+```
+#### Output tokens
+
+```{r}
+
+mutants |>
+  ggplot(aes(x = output_tokens, fill = factor(number_of_messages))) +
+  geom_histogram(position = "stack", bincount = 20) +
+  scale_fill_discrete(name = "Number of messages") +
+  facet_wrap( ~ cut) +
+  xlab("Output tokens") + 
+  ylab("Count of conversations") +
+  ggtitle("Output tokens for mutant generation")
+
+```
+## Generating tests
+
+```{r}
+tests |>
+  filter(llm_or_human == "LLM") |>
+  pivot_longer(
+    cols = c(input_tokens, output_tokens),
+    names_to = "token_type",
+    values_to = "token_count"
+  ) |>
+  mutate(
+    token_type = factor(token_type, levels = c("input_tokens", "output_tokens"), labels = c("Input", "Output"))
+  ) |>
+  ggplot(aes(x = token_type, y = token_count, fill = factor(number_of_messages))) +
+  geom_boxplot() + 
+  xlab("Token type") +
+  scale_fill_manual(values = colors.quality, name = "Number of messages") +
+  facet_wrap( ~ cut, nrow = 1) +
+  ylab("Token count") +
+  ggtitle("Token usage for LLM generated tests")
+  
+```
+
+### As a histogram:
+
+#### Input tokens
+
+```{r}
+  
+deftests |>
+  ggplot(aes(x = input_tokens, fill = factor(number_of_messages))) +
+  geom_histogram(position = "stack", bincount = 20) +
+  scale_fill_discrete(name = "Number of messages") +
+  facet_wrap( ~ cut) +
+  xlab("Input tokens") + 
+  ylab("Count of conversations") + 
+  ggtitle("Input tokens for test generation")
+  
+
+```
+
+
+#### Output tokens
+
+```{r}
+
+deftests |>
+  ggplot(aes(x = output_tokens, fill = factor(number_of_messages))) +
+  geom_histogram(position = "stack", bincount = 20) +
+  scale_fill_discrete(name = "Number of messages") +
+  facet_wrap( ~ cut) +
+  xlab("Output tokens") + 
+  ylab("Count of conversations") +
+  ggtitle("Output tokens for test generation")
+```
+
+# Failures
+
+Not all tests and mutants that are submitted by human or by the LLM players are
+valid. Some of them fail the initial validation phase: In this case, the 
+submissions never enter the database. For human submissions, this means that we
+have no data whatsoever, for LLM submissions, that we have to parse the messages
+of failed LLM conversations for more information. Initial validation fails if
+one of the various validation rules for CodeDefenders is violated (for example,
+if a test contains more than 2 assertions, or if there are calls to `System` or 
+`Random`) or if the submission cannot be parsed by a Java Parser.
+
+Two types of failures can be directly analyzed: Submissions that can be parsed, but
+not compiled, and tests that fail on the original class.
+
+## Validation errors for LLMs
+
+TODO! UserMessages auswerten
+
+## Uncompilable
+
+```{r}
+failure_test_stats <- all_tests |>
+  filter(!is_equivalence_test) |>
+  summarise(
+    uncompilable = mean(!is_compiled),
+    fails_against_cut = mean(fails_against_cut),
+    .by = c(llm_or_human, opponent_llm_or_human, cut)
+  )
+
+failure_mutant_stats <- all_tests |>
+  summarise(
+    uncompilable = mean(!is_compiled),
+    .by = c(llm_or_human, opponent_llm_or_human, cut)
+  )
+```
+
+
+### Tests
+
+For humans, there is only a small difference in compilation rates between
+playing against another human and playing against an LLM. LLM players, however,
+submit a much higher percentage of uncompilable tests when playing against a
+human than when playing against another LLM. I did not expect any significant 
+difference at all, and I have no explanation for this. TODO
+
+```{r}
+all_tests |>
+  filter(!is_equivalence_test) |>
+  mutate(uncompilable = !is_compiled) |>
+  binary_mean_cols(y = uncompilable, type = "t") +
+  ggtitle("Uncompilable tests") +
+  ylab("Uncompilable")
+```
+
+Curiously, the failure rates of tests against the CuT, when written by humans,
+are much higher for `ByteVector` than for `CharRange`, while the compilation
+rates are higher for `CharRange` than for `ByteVector`. For both variables,
+high rates suggest difficulties for human testers in understanding the source 
+code, but they point in opposite directions.
+
+For `CharRange`, LLMs and Humans achieved similar failure rates of about
+10%, but for `ByteVector`, Human failure rates reached around 34%, while LLM
+failure rates only reached about 4%.
+
+```{r}
+all_tests |>
+  filter(!is_equivalence_test) |>
+  binary_mean_cols(y = fails_against_cut, type = "t") +
+  ggtitle("Tests that fail against the CuT") +
+  ylab("Failure rate")
+```
+
+### Mutants
+
+Once the initial validation was passed, only very few LLM-generated mutants
+failed to compile, in fact, only a single LLM-generated mutant didn't compile
+for `ByteVector`. As with tests, human-written mutants failed to compile
+more often when matched against other humans, but the effect is small.
+TODO Quantify!
+
+```{r}
+all_mutants |>
+  mutate(uncompilable = !is_compiled) |>
+  binary_mean_cols(y = uncompilable, type = "m") +
+  ggtitle("Uncompilable mutants") +
+  ylab("Uncompilable")
+```
 
