@@ -36,7 +36,7 @@ scale_percentage_bars <- function(dodge_value = 0.9, vjust = 1.5) {
   scale_y_continuous(labels = percent),
   geom_col(position = "dodge"),
   geom_text(
-    aes(label = percent(after_stat(y))),
+    aes(label = percent(after_stat(y), accuracy = 0.1)),
     position = position_dodge(dodge_value), 
     vjust = vjust
     )
@@ -225,7 +225,8 @@ point_boxplot <- function(.data, author = "Author", opponent = "Opponent") {
     geom_boxplot() +
     scale_fill_manual(values = colors.actor, name = opponent) +
     xlab(author) +
-    ylab("Points")
+    ylab("Points") +
+    facet_wrap( ~ cut)
 }
 
 deftests |>
@@ -240,21 +241,16 @@ often.
 ```{r}
 deftests |>
   mutate(has_points = points > 0) |>
-  group_by(llm_or_human, opponent_llm_or_human) |>
-  summarise(has_points = mean(has_points)) |>
-  ggplot(aes(y = has_points, x = llm_or_human, fill = opponent_llm_or_human)) +
-  geom_col(position = "dodge") +
-  geom_text(aes(label = percent(after_stat(y))), vjust = 1.5, position = position_dodge(0.9)) +
-  scale_fill_manual(values = colors.actor, name = "Attacker") +
-  scale_y_continuous(labels = percent, name = NULL)+ 
-  xlab("Defender") +
+  binary_mean_cols(has_points, "t") +
+  ylab(NULL) +
   ggtitle("Tests with at least one point")
 ```
 The average human-written tests scores higher than the average LLM-written test.
+The difference is small (TODO significance?) in `CharRange`, larger in `ByteVector`.
 
 ```{r}
 deftests |>
-  group_by(llm_or_human, opponent_llm_or_human) |>
+  group_by(llm_or_human, opponent_llm_or_human, cut) |>
   summarise(mean_points = mean(points)) |>
   ggplot(aes(x = llm_or_human, y = mean_points, fill = opponent_llm_or_human)) +
   geom_col(position = "dodge") +
@@ -266,7 +262,8 @@ deftests |>
   xlab("Defender") +
   ylab("Points") +
   ggtitle("Average test points") + 
-  scale_fill_manual(name = "Attacker", values = colors.actor)
+  scale_fill_manual(name = "Attacker", values = colors.actor) +
+  facet_wrap( ~ cut)
 ```
 ## Points of individual mutants
 
@@ -283,23 +280,17 @@ easier for both LLM and human attackers, compared with an LLM defender.
 ```{r}
 mutants |>
   mutate(has_points = points > 0) |>
-  group_by(llm_or_human, opponent_llm_or_human) |>
-  summarise(has_points = mean(has_points)) |>
-  ggplot(aes(y = has_points, x = llm_or_human, fill = opponent_llm_or_human)) +
-  geom_col(position = "dodge") +
-  geom_text(aes(label = percent(after_stat(y))), vjust = 1.5, position = position_dodge(0.9)) +
-  scale_fill_manual(values = colors.actor, name = "Defender") +
-  scale_y_continuous(labels = percent, name = NULL)+ 
-  xlab("Attacker") +
+  binary_mean_cols(has_points, "m") +
+  ylab(NULL) +
   ggtitle("Mutants with at least one point")
 ```
 In contrast, the average number of points is higher when playing against an
 LLM defender compared to a human defender. Average mutant points are
-generally much higher for human attackers.
+generally higher for human attackers, especially in `ByteVector`.
 
 ```{r}
 deftests |>
-  group_by(llm_or_human, opponent_llm_or_human) |>
+  group_by(llm_or_human, opponent_llm_or_human, cut) |>
   summarise(mean_points = mean(points)) |>
   ggplot(aes(x = llm_or_human, y = mean_points, fill = opponent_llm_or_human)) +
   geom_col(position = "dodge") +
@@ -311,7 +302,8 @@ deftests |>
   xlab("Attacker") +
   ylab("Points") +
   ggtitle("Average mutant points") + 
-  scale_fill_manual(name = "Defender", values = colors.actor)
+  scale_fill_manual(name = "Defender", values = colors.actor) +
+  facet_wrap( ~ cut)
 ```
 
 
@@ -386,12 +378,13 @@ timelineplot <- function(.data) {
                     1 / number_of_test_games[number_of_test_games$llm_or_human == "Human","n"]
                     ))
     ) |>
-    group_by(`Minutes since gamestart`, llm_or_human) |>
+    group_by(`Minutes since gamestart`, llm_or_human, cut) |>
     summarise(
       part = sum(part)
     ) |>
   ggplot(aes(x = `Minutes since gamestart`, y = part, colour = llm_or_human)) +
-    geom_line()
+    geom_line() +
+    facet_wrap( ~ cut)
 }
 
 deftests |>
@@ -435,7 +428,8 @@ deftests|>
   ggplot(aes(x = `Minutes since gamestart`, colour = number_of_messages)) +
     geom_freqpoly(binwidth = 1) + 
     ylab("Tests per minute") +
-    scale_colour_manual(name = "Number of messages", values = c("black", colors.quality))
+    scale_colour_manual(name = "Number of messages", values = c("black", colors.quality)) +
+    facet_wrap( ~ cut)
   
 ```
 
@@ -451,7 +445,8 @@ mutants|>
   ggplot(aes(x = `Minutes since gamestart`, colour = number_of_messages)) +
     geom_freqpoly(binwidth = 1) + 
     ylab("Mutants per minute") +
-    scale_colour_manual(name = "Number of messages", values = c(colors.quality))
+    scale_colour_manual(name = "Number of messages", values = c(colors.quality)) +
+    facet_wrap( ~ cut)
 ```
 
 
@@ -506,22 +501,10 @@ generate a complete test suite before writing individual tests.
 
 ```{r}
 mutants |>
-  group_by(llm_or_human, opponent_llm_or_human) |>
-  summarise(
-    stillborn = mean(is_stillborn)
-  ) |>
-  ggplot(aes(x = llm_or_human, y = stillborn, fill = opponent_llm_or_human)) +
-    geom_col(position = "dodge") +
-    geom_text(
-      aes(label = percent(stillborn)), 
-      position = position_dodge(0.9),
-      vjust = 1.5,
-    ) +
-    scale_fill_manual(name = "Defender", values = colors.actor) + 
-    xlab("Attacker") + 
-    ylab("Percentage") + 
-    ggtitle("Percentages of stillborn mutants") +
-    scale_y_continuous(labels = percent)
+  binary_mean_cols(is_stillborn, "m") +
+  ylab("Stillborn") +
+  ggtitle("Percentages of stillborn mutants")
+
 
 ```
 There are, however, only very slight differences in total evasion rates
@@ -608,12 +591,9 @@ mutants |>
     aes(x = has_been_killed, y = declared_equivalent, fill = llm_or_human)
     ) +
     geom_col(position = "dodge") +
-    geom_text(aes(
-      label = percent(declared_equivalent),
-      vjust = -0.4
-      ), position = position_dodge(0.9)) +
     facet_wrap( ~ opponent_llm_or_human,) + 
-    scale_y_continuous(labels = percent, name = "Mutants declared as equivalent") + 
+    ylab("Mutants declared as equivalent") +
+    scale_percentage_bars() +
     scale_x_discrete(labels = c("Equivalent", "Not equivalent")) +
     scale_fill_manual(name = "Attacker", values = colors.actor) +
     ggtitle("Equivalent mutants") + 
@@ -631,27 +611,15 @@ automatically claimed as equivalent at the end of the game.
 
 ```{r}
 mutants |>
-  group_by(llm_or_human, opponent_llm_or_human) |>
-  summarise(`Survival rate` = mean(survived)) |>
-  ggplot(aes(y = `Survival rate`, x = llm_or_human, fill = opponent_llm_or_human)) +
-  scale_fill_manual(values = colors.actor, name = "Defender") +
-  xlab("Attacker") + 
-  scale_y_continuous(name = "Survival rate", labels = percent) +
-  geom_col(position = "dodge") + 
-  geom_text(aes(label = percent(`Survival rate`)), vjust = -0.2, position = position_dodge(0.9)) + 
+  binary_mean_cols(survived, "m")+
+  ylab("Survival rate") +
   ggtitle("Mutant survival rates")
 ```
 ```{r}
 mutants |>
   filter(!is_stillborn) |>
-  group_by(llm_or_human, opponent_llm_or_human) |>
-  summarise(`Survival rate` = mean(survived)) |>
-  ggplot(aes(y = `Survival rate`, x = llm_or_human, fill = opponent_llm_or_human)) +
-  scale_fill_manual(values = colors.actor, name = "Defender") +
-  xlab("Attacker") + 
-  scale_y_continuous(name = "Survival rate", labels = percent) +
-  geom_col(position = "dodge") + 
-  geom_text(aes(label = percent(`Survival rate`)), vjust = -0.2, position = position_dodge(0.9)) +
+  binary_mean_cols(survived, "m") +
+  ylab("Survival rate") +
   ggtitle("Mutant survival rates (excluding stillborn mutants)")
 ```
 
@@ -808,9 +776,13 @@ attacker_games |>
 
 ## Winrates
 
-Generally, attackers have a very high win rate, at about 80%. The only exception
-is in LLM-vs-LLM games, where it falls down to just 22%. 
+Generally, attackers have a very high win rate, at about 80%.
 
+In `ByteVector`, attackers win every single game except in LLM-vs-LLM setups,
+while winrates in `CharRange` are more balanced. 
+
+In LLM-vs-LLM games, winrates for defenders are much higher than in all
+other setups. 
 This difference could be the effect of a unique mechanic of LLM-vs-LLM games,
 where all surviving mutants are claimed as equivalent. As seen above, LLM
 attackers are much more likely to fail to prove that a mutant is not equivalent,
@@ -825,7 +797,7 @@ games <- attacker_games |>
   select(!starts_with("opponent"))
 
 games |>
-  group_by(llm_or_human.attacker, llm_or_human.defender) |>
+  group_by(llm_or_human.attacker, llm_or_human.defender, cut) |>
   summarise(
     defender_winrate = mean(points.defender > points.attacker)
     ) |>
@@ -836,12 +808,13 @@ games |>
   xlab("Defender") +
   ggtitle("Defender winrates") +
   scale_y_continuous(labels = percent, name = "Defender winrate") +
-  geom_text(position = position_dodge(0.9), vjust = 1.5)
+  geom_text(position = position_dodge(0.9), vjust = 1.5) +
+  facet_wrap( ~ cut)
 ```
 
 ```{r}
 games |>
-  group_by(llm_or_human.attacker, llm_or_human.defender) |>
+  group_by(llm_or_human.attacker, llm_or_human.defender, cut) |>
   summarise(
     attacker_winrate = mean(points.defender < points.attacker)
     ) |>
@@ -852,7 +825,8 @@ games |>
   xlab("Attacker") +
   ggtitle("Attacker winrates") +
   scale_y_continuous(labels = percent, name = "Attacker winrate") +
-  geom_text(position = position_dodge(0.9), vjust = 1.5)
+  geom_text(position = position_dodge(0.9), vjust = 1.5) +
+  facet_wrap( ~ cut)
 ```
 
 ## Point ratios
@@ -861,15 +835,18 @@ Win/Lose is a binary value that doesn't show the degree to which a player has
 won or lost. For this, we will look at the ratio of defender points vs attacker
 points.
 
+The differences between the classes don't look as extreme now, though
+they are still remarkable. TODO Quantify!
+
 ```{r}
 games |>
-  group_by(llm_or_human.attacker, llm_or_human.defender) |>
   mutate(point_ratio = points.defender / ifelse(points.attacker != 0, points.attacker, 1)) |>
   ggplot(aes(x = llm_or_human.defender, fill = llm_or_human.attacker, y = point_ratio)) +
   geom_boxplot() +
   scale_fill_manual(values = colors.actor, name = "Attacker") +
   xlab("Defender") +
-  ylab("Defender points / attacker points")
+  ylab("Defender points / attacker points") +
+  facet_wrap( ~ cut)
 ```
 
 
@@ -1030,26 +1007,8 @@ not compiled, and tests that fail on the original class.
 
 TODO! UserMessages auswerten
 
-## Uncompilable
 
-```{r}
-failure_test_stats <- all_tests |>
-  filter(!is_equivalence_test) |>
-  summarise(
-    uncompilable = mean(!is_compiled),
-    fails_against_cut = mean(fails_against_cut),
-    .by = c(llm_or_human, opponent_llm_or_human, cut)
-  )
-
-failure_mutant_stats <- all_tests |>
-  summarise(
-    uncompilable = mean(!is_compiled),
-    .by = c(llm_or_human, opponent_llm_or_human, cut)
-  )
-```
-
-
-### Tests
+## Tests
 
 For humans, there is only a small difference in compilation rates between
 playing against another human and playing against an LLM. LLM players, however,
@@ -1084,7 +1043,7 @@ all_tests |>
   ylab("Failure rate")
 ```
 
-### Mutants
+## Mutants
 
 Once the initial validation was passed, only very few LLM-generated mutants
 failed to compile, in fact, only a single LLM-generated mutant didn't compile
