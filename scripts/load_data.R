@@ -2,8 +2,6 @@ library(dplyr)
 library(stringr)
 library(tidyr)
 
-rm(list = ls())
-
 experience_levels <- c("< 3 Monate", 
                        ">= 3 Monate && < 6 Monate", 
                        ">= 6 Monate && < 1 Jahr", 
@@ -23,13 +21,18 @@ rename_to_opponent <- function(df) {
     })
 }
 
+normalise_value <- function(l) {
+  l <- as.numeric(l)
+  tmp <- (l - min(l, na.rm = TRUE)) / (max(l, na.rm = TRUE) - min(l, na.rm = TRUE))
+}
+
 load_tests <- function(study) {
   if (!study %in% c("llmvsllm", "userstudy")) {
     stop(paste("study must be llmvsllm or userstudy, was ", study))
   }
   
   readdbtable <- function(filename) {
-    read.csv(paste("rawdata", study, "db_tables", filename, sep = "/")) |>
+    read.csv(paste("rawdata", study, "db_tables", filename, sep = "/"), skipNul = TRUE) |>
       rename_with(tolower)
   }
   
@@ -165,7 +168,7 @@ load_mutants <- function(study) {
   }
   
   readdbtable <- function(filename) {
-    read.csv(paste("rawdata", study, "db_tables", filename, sep = "/")) |>
+    read.csv(paste("rawdata", study, "db_tables", filename, sep = "/"), skipNul = TRUE) |>
       rename_with(tolower)
   }
   
@@ -447,6 +450,59 @@ killmap_data <- function(tests, mutants) {
   )
 }
 
+load_messages <- function(study) {
+  if (!study %in% c("llmvsllm", "userstudy")) {
+    stop(paste("study must be llmvsllm or userstudy, was ", study))
+  }
+  
+  
+  readdbtable <- function(filename) {
+    read.csv(paste("rawdata", study, "db_tables", filename, sep = "/"), skipNul = TRUE) |>
+      rename_with(tolower)
+  }
+  
+  experiment <- readdbtable("experiment.csv") |>
+    filter(experiment_name == "study") |>
+    select(int_value)
+  
+  conversations <- readdbtable("llm_conversations.csv") |>
+    filter(study == "llmvsllm" | game_id != 345) |>
+    filter(study == "userstudy" | game_id %in% experiment$int_value) |>
+    mutate(
+      strategy = factor(strategy),
+      type = factor(type),
+      is_active = as.logical(is_active),
+      is_success = as.logical(is_success)
+    )
+  
+  
+  messages <- readdbtable("llm_messages.csv") |>
+    select(conversation_id, index_in_conversation, message_type, input_tokens, output_tokens, content) |>
+    inner_join(conversations, join_by(conversation_id)) |>
+    mutate(
+      rejection_reason = case_when(
+        message_type != "SYSTEM" | index_in_conversation == 0 ~ NA,
+        startsWith(content, "Your mutant failed to compile.") ~ "mutant_compile_error",
+        startsWith(content, "Your mutant already exists.") ~ "mutant_already_exists",
+        startsWith(content, "Your mutant has violated the following rule:") ~ "mutant_rule_violation",
+        grepl("It did not pass on the original code for the following reason:", content, fixed = TRUE) ~ "test_failed_original",
+        startsWith(content, "Your test did not pass on the original code for") ~ "test_failed_original",
+        grepl("It has failed to compile for this reason:", content, fixed = TRUE) ~ "test_compile_error",
+        startsWith(content, "Your test failed to compile for this reason:") ~ "test_compile_error",
+        grepl("It has violated these rules:", content, fixed = TRUE) ~ "test_rule_violation",
+        startsWith(content, "Your test has violated these rules:") ~ "test_rule_violation",
+        .default = "other"
+      )
+    ) |>
+    mutate(rejection_reason = factor(rejection_reason)) |>
+    mutate(
+      mutant_id = ifelse(is.na(mutant_id), NA, paste(substr(study, start = 1, stop = 1), mutant_id, sep = "")),
+      test_id = ifelse(is.na(test_id), NA, paste(substr(study, start = 1, stop = 1), test_id, sep = "")),
+      conversation_id = ifelse(is.na(conversation_id), NA, paste(substr(study, start = 1, stop = 1), conversation_id, sep = ""))
+    )
+    
+}
+
 
 round_1_survey <- read.csv("rawdata/questionnaires/CodeDefenders Studie zu LLM-Spielern - Runde 1.csv") |>
   rename(
@@ -498,7 +554,10 @@ questionnaire <- read.csv("rawdata/questionnaires/CodeDefenders_Questionare_LLM_
     Q4 = Welche.der.Junit.Assertions.wird.im.folgenden.Code.die.Zeile.mit.dem.Kommentar.....Test.me..ausführen.,
     Q5 = Für.den.unten.gegebenen.Code.wird.diese.JUnit.Assertion.fehlschlagen...assertEquals.2..lastIndexOf.Arrays.asList..a....b....a.....a..........................................................................Wie.würdest.du.den.Code.fixen..damit.die.Assertion.wieder.durchläuft.
   ) |>
-  mutate(username = trimws(username)) |>
+  mutate(
+    username = trimws(username)
+    
+    ) |>
   full_join(round_2_survey[, c("username", "future_interest", "future_interest_reason", "other_remarks")], 
             join_by(username)) |>
   mutate(
@@ -512,22 +571,66 @@ questionnaire <- read.csv("rawdata/questionnaires/CodeDefenders_Questionare_LLM_
     degree = factor(degree),
     java_experience = factor(java_experience, ordered = TRUE, levels = experience_levels, labels = experience_labels),
     junit_experience = factor(junit_experience, ordered = TRUE, levels = experience_levels, labels = experience_labels),
-  ) |>
+  ) %>%
+  mutate(
+    ., 
+    skill = ( normalise_value(.$junit_experience) +
+      normalise_value(.$number_correct_questions)
+      ) / 2
+    ) |>
+  mutate(actor = ifelse(skill < median(skill, na.rm = TRUE), "low-skilled", "high-skilled")) |>
+  
   unique()
 
 all_tests <- load_tests("userstudy") |>
   left_join(questionnaire, join_by(username)) |>
   left_join(survey, join_by(username, round)) |>
   left_join(rename_to_opponent(questionnaire), join_by(opponent_username)) |>
-  left_join(rename_to_opponent(survey), join_by(opponent_username, round == opponent_round)) |>
-  bind_rows(load_tests("llmvsllm"))
+  left_join(rename_to_opponent(survey), join_by(opponent_username, round == opponent_round)) %>%
+  bind_rows(load_tests("llmvsllm")) |>
+  mutate(actor = factor(ifelse(llm_or_human == "LLM", "LLM", actor), 
+                        levels = c("low-skilled", "high-skilled", "LLM")
+                        ),
+         opponent_actor = factor(ifelse(opponent_llm_or_human == "LLM", "LLM", opponent_actor),
+                                 levels = c("low-skilled", "high-skilled", "LLM")
+         ))
 
 all_mutants <- load_mutants("userstudy") |>
   left_join(questionnaire, join_by(username)) |>
   left_join(survey, join_by(username, round)) |>
   left_join(rename_to_opponent(questionnaire), join_by(opponent_username)) |>
   left_join(rename_to_opponent(survey), join_by(opponent_username, round == opponent_round)) |>
-  bind_rows(load_mutants("llmvsllm"))
+  bind_rows(load_mutants("llmvsllm")) |>
+  mutate(
+    actor = factor(ifelse(llm_or_human == "LLM", "LLM", actor),
+                        levels = c("low-skilled", "high-skilled", "LLM")
+                   ),
+    opponent_actor = factor(ifelse(opponent_llm_or_human == "LLM", "LLM", opponent_actor),
+                            levels = c("low-skilled", "high-skilled", "LLM")
+    ),
+  )
+
+# TODO  WICHTIG!!! Nach experiment-games filtern
+all_messages <- load_messages("userstudy") |>
+  bind_rows(load_messages("llmvsllm"))
+
+all_conversations <- all_messages |>
+  mutate(value = 1) |>
+  pivot_wider(
+    names_from = rejection_reason,
+    values_from = value,
+    values_fill = 0,
+    names_prefix = "rejection_"
+  ) |>
+  summarise(
+    input_tokens = sum(input_tokens),
+    output_tokens = sum(output_tokens),
+    across(starts_with("rejection_"), sum),
+    .by = c(conversation_id, game_id, strategy, type, user_id, mutant_id, test_id, is_success)
+  ) |>
+  filter(
+    
+  )
 
 
 # Killmaps data for tests contains 2 rows with NAs: One test has no coverage and
@@ -538,3 +641,8 @@ tmp <- killmap_data(tests = filter(all_tests, is_compiled), mutants = filter(all
 tests <- tmp$tests
 mutants <- tmp$mutants
 rm(tmp)
+
+
+
+deftests <- tests |> 
+  filter(!is_equivalence_test, !fails_against_cut)

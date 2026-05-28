@@ -15,11 +15,13 @@ knitr::opts_chunk$set(echo = F)
 
 ```{r data-setup, include=FALSE}
 rm(list = ls())
+#install.packages("patchwork")
 library(ggplot2)
 library(dplyr)
 library(viridisLite)
 library(tidyr)
 library(scales)
+library(patchwork)
 getwd()
 
 source("scripts/load_data.R")
@@ -43,21 +45,16 @@ scale_percentage_bars <- function(dodge_value = 0.9, vjust = 1.5) {
   )
 }
 
-# Groups by llm_or_mutant, opponent_llm_or_mutant and cut,
+# Groups by llm_or_human, opponent_llm_or_human and cut,
 scale_default_grouping <- function(type) {
   if (! type %in% c("t", "m")) {
     stop("type must be t or m")
   }
   list(
     aes(x = llm_or_human, fill = opponent_llm_or_human),
-    scale_x_discrete(
-      name = ifelse(type == "t", "Defender", "Attacker")
-    ),
-    scale_fill_manual(
-      values = colors.actor, 
-      name = ifelse(type == "t", "Attacker", "Defender")
-    ),
-    facet_wrap( ~ cut)
+    facet_wrap( ~ cut),
+    labs(x = ifelse(type == "t", "Defender", "Attacker"), 
+         fill = ifelse(type == "t", "Attacker", "Defender"),)
     
   )
 }
@@ -96,9 +93,220 @@ number_of_mutant_games <- mutants |>
     n = n_distinct(game_id)
   )
 
-deftests <- tests |> 
-  filter(!is_equivalence_test, !fails_against_cut)
+
+# Returns a df where all specified columns are normalised to a value between
+# 0 and 1
+normalise <- function(.data, ...) {
+  cols <- enquos(...)
+  .data |>
+    mutate(across(c(!!!cols), function(p) {
+      p <- as.numeric(p)
+      (p - min(p, na.rm = TRUE)) / (max(p, na.rm = TRUE) - min(p, na.rm = TRUE))
+      }
+      ))
+}
+
+# Utility functions for displaying results from regression models
+
+estimate <- function(model, coeff_name) {
+  round(model$coefficients[coeff_name, "Estimate"], digits = 4)
+}
+
+p.value <- function(model, coeff_name) {
+  round(model$coefficients[coeff_name, "Pr(>|t|)"], digits = 4)
+}
+
+r.sq <- function(model) {
+  percent(model$r.squared, accuracy = 0.01)
+}
+
 ```
+
+# Human skill levels
+
+NOTE: I don't think this is really useful, after all. 
+There are only 24 players, so there are only 12 players for each role.
+Dividing these into two groups based on skill level leaves only 6 players in
+each group (role + class + skill level), with only a very dodgy theoretical
+reasoning as to why this classification should matter at all.
+
+In the questionnaire, study participants could enter their semester, their
+experience with Java and JUnit, respectively, and they had to answer a short
+single-choice
+quiz with JUnit-related questions.
+
+```{r}
+questionnaire |>
+  pivot_longer(
+    cols = c(
+      java_experience, 
+      junit_experience
+      ),
+    names_to = "xp_type",
+    values_to = "xp_value"
+    ) |>
+  mutate(xp_type = recode_values(
+    xp_type,
+    "java_experience" ~ "Java experience",
+    "junit_experience" ~ "JUnit experience"
+  )) |>
+  summarise(n = n(), .by = c(xp_type, xp_value)) |>
+  
+  ggplot(aes(x = xp_type, y = n, fill = xp_value)) +
+  geom_col(position = "stack") +
+  geom_text(aes(label = after_stat(y)), position = position_stack(vjust = 0.5)) +
+  labs(fill = "Experience", x = NULL, y = "Count", 
+       title = "Experience of study participants")
+
+```
+```{r}
+questionnaire |>
+  mutate(number_correct_questions = ordered(number_correct_questions)) |>
+  summarise(n = n(), .by = c(number_correct_questions)) |>
+  ggplot(aes(x = "", y = n, fill = number_correct_questions)) +
+  geom_col() +
+  geom_text(aes(label = n), position = position_stack(vjust = 0.5)) +
+  labs(x = NULL, y = "Count", fill = "Number of correctly answered questions",
+       title = "Quiz results")
+```
+
+```{r}
+questionnaire |>
+  mutate(semester = ordered(semester)) |>
+  summarise(n = n(), .by = c(semester)) |>
+  ggplot(aes(x = "", y = n, fill = semester)) +
+  geom_col() +
+  geom_text(aes(label = n), position = position_stack(vjust = 0.5)) +
+  labs(x = NULL, y = "Count", fill = "Semester",
+       title = "Semester of participants")
+```
+## Skill levels as predictors of submission quality
+
+It might be useful in further analysis to divide users into highly-skilled,
+mid-skilled and low-skilled users. We will use a linear regression model to
+see if and how these aforementioned variables predict submission quality.
+
+For submission quality, we choose *Kill rate* and *Evasion rate* 
+(defined later in the document) as proxies, as they are calculated against
+the totality of other mutants/tests and rely less on the highly unpredictable
+nature of a single game.
+
+
+### For tests:
+Hypothesis: The number of correctly answered questions, Java experience,
+JUnit experience and semester all are positively correlated with Kill rate
+for tests. We control for experiment round (practice could increase quality,
+or boredom could decrease it), the Class under Test, and whether the opponent 
+is an LLM player
+or a human.
+
+We normalize the variables for better comparability.
+
+```{r}
+testmodel <- deftests |>
+  filter(llm_or_human == "Human") |>
+  normalise(number_correct_questions, java_experience, junit_experience, semester) %>%
+  lm(data = .,
+        kill_rate ~ number_correct_questions 
+          + java_experience
+          + junit_experience
+          + semester 
+          + round 
+          + cut 
+          + opponent_llm_or_human
+     ) |>
+  summary()
+
+testmodel
+```
+
+Result: Of the proposed variables, only *JUnit-Experience* has an effect on
+_kill rate_ that is significant to a level of 5%. The difference between those
+of lowest experience and those of highest experience
+increases evasion rate by `r estimate(testmodel, "junit_experience")`.
+
+Overall, the model explains
+`r r.sq(testmodel)` of the total variation.
+
+### For mutants:
+
+We repeat this procedure for mutants, checking for *evasion rate*.
+
+```{r}
+
+mutantmodel <- mutants |>
+  filter(llm_or_human == "Human") |>
+  normalise(number_correct_questions, java_experience, junit_experience, semester) %>%
+  lm(data = .,
+        evasion_rate ~ number_correct_questions 
+          + java_experience
+          + junit_experience
+          + semester 
+          + round 
+          + cut 
+          + opponent_llm_or_human
+     ) |>
+  summary()
+
+mutantmodel
+```
+
+This paints a very different picture than the analysis for tests: The 
+_number of correctly answered questions_ is positively correlated to 
+_evasion rate_ (`r estimate(mutantmodel, "number_correct_questions")`), 
+as is _JUnit experience_ (`r estimate(mutantmodel, "junit_experience")`). 
+_Java Experience_ however is negatively correlated 
+(`r estimate(mutantmodel, "java_experience")`), as is _semester_
+(`r estimate(mutantmodel, "semester")`), although _semester_ no longer fits
+the significance level of 5% with a p-value of 
+`r p.value(mutantmodel, "semester")`. Overall, this only explains 
+`r r.sq(mutantmodel)` of the total variation, much less than for tests.
+
+### Calculating a skill metric
+
+I decided on a combination of quiz results and JUnit experience as a skill 
+metric, as both have a significant positive effect on mutant quality, and a
+possibly positive effect on test quality. Semester and Java experience have
+a positive effect on test quality and a negative effect on mutant quality
+and are therefore not included.
+
+This stat is simply calculated as the mean of the normalized values of these
+two variables. (Note TODO remove before end TODO: This happens within 
+`load_data.R`) Then, players are sorted into LLM, low-skilled human (skill is
+below the median), and high-skilled human (skill is above the median).
+
+
+
+
+
+```{r}
+deftests |>
+  filter(!is.na(kill_rate)) |>
+  ggplot(aes(x = actor, fill = actor, y = kill_rate)) +
+  geom_boxplot() +
+  labs(fill = NULL, y = "Killrate", x = "Defender")
+  
+  
+```
+# Influence of experiment round
+
+Users played two different games:
+
+- In both games, they played the same role, either attacker or defender.
+- In one game, they played against another human, in the other one against
+an LLM player
+- In one game, they played on `ByteVector`, in the other one, on `CharRange`.
+
+
+```{r}
+mutants |>
+  filter(llm_or_human == "Human") |>
+  ggplot(aes(y = evasion_rate, x = round)) +
+  geom_boxplot()
+```
+
+
+
 
 # Killrates
 
@@ -935,6 +1143,8 @@ mutants |>
 ```
 ## Generating tests
 
+This only covers tests
+
 ```{r}
 tests |>
   filter(llm_or_human == "LLM") |>
@@ -1005,7 +1215,23 @@ not compiled, and tests that fail on the original class.
 
 ## Validation errors for LLMs
 
-TODO! UserMessages auswerten
+```{r}
+all_messages |>
+  filter(user_id == 6) |>
+  summarise(n = n(), .by = c(rejection_reason, is_success)) |>
+  filter(!is.na(rejection_reason)) |>
+  #pivot_longer(cols = starts_with("rejection_"), 
+  #             names_to = "rejection_type", 
+  #             values_to = "rejection_count",
+  #             values_drop_na = TRUE) |>
+  #filter(rejection_type != "rejection_NA") |>
+  ggplot(aes(fill = rejection_reason, y = n, x = is_success)) +
+  geom_col(position = "fill") +
+  labs(title = "Rejection reasons for defender tests",
+       x = "Conversation is eventually successful",
+       y = "Percentage of failed attempts",
+       fill = "Rejection reason")
+```
 
 
 ## Tests
