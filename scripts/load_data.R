@@ -15,10 +15,21 @@ experience_labels <- c("< 3 months",
                        ">= 1 year && < 3 years",
                        ">= 3 years")
 
+tee <- function(.data, f) {
+  f()
+  .data
+}
+
 rename_to_opponent <- function(df) {
   rename_with(df, function(c) {
     paste("opponent", c, sep = "_")
     })
+}
+
+rename_to_author <- function(df) {
+  rename_with(df, function(c) {
+    paste("author", c, sep = "_")
+  })
 }
 
 normalise_value <- function(l) {
@@ -122,7 +133,8 @@ load_tests <- function(study) {
     ) |>
     rename(
       is_compiled = classfile,
-      test_file = javafile
+      test_file = javafile,
+      author_player_id = player_id
     ) |>
     left_join(classes, join_by(class_id)) |>
     select(!c(javafile, class_id)) |>
@@ -134,10 +146,10 @@ load_tests <- function(study) {
         as.numeric(units = "secs")
     ) |>
     select(!c(timestamp, game_start)) |>
-    inner_join(players, join_by(player_id == player_id, game_id == game_id)) |>
+    inner_join(rename_to_author(players), join_by(author_player_id, game_id == author_game_id)) |>
     inner_join(rename_to_opponent(players), join_by(game_id == opponent_game_id), relationship = "many-to-many") |>
     left_join(conversations, join_by(test_id, game_id)) |>
-    filter(player_id != opponent_player_id) |>
+    filter(author_player_id != opponent_player_id) |>
     left_join(test_smell, join_by(test_id)) |>
     mutate(
       across(starts_with("smell"), function(x){
@@ -145,7 +157,7 @@ load_tests <- function(study) {
       })
     ) |>
     mutate(
-      is_equivalence_test = role != "DEFENDER"
+      is_equivalence_test = author_role != "DEFENDER"
     ) |>
     
     
@@ -233,12 +245,15 @@ load_mutants <- function(study) {
   
   mutants <- readdbtable("mutants.csv") |>
     select(mutant_id, javafile, classfile, alive, game_id, class_id, equivalent, player_id, timestamp, points, mutatedlines, killmessage) |>
-    rename(mutant_file = javafile) |>
+    rename(
+      mutant_file = javafile,
+      author_player_id = player_id
+      ) |>
     inner_join(games, join_by(game_id == id)) |>
-    inner_join(players, join_by(player_id == player_id, game_id == game_id)) |>
+    inner_join(rename_to_author(players), join_by(author_player_id, game_id == author_game_id)) |>
     inner_join(rename_to_opponent(players), join_by(game_id == opponent_game_id), relationship = "many-to-many") |>
     left_join(conversations, join_by(mutant_id, game_id)) |>
-    filter(player_id != opponent_player_id) |>
+    filter(author_player_id != opponent_player_id) |>
     inner_join(classes, join_by(class_id)) |>
     left_join(equivalences, join_by(mutant_id)) |>
     select(!javafile) |>
@@ -274,12 +289,12 @@ load_mutants <- function(study) {
 killmap_data <- function(tests, mutants) {
   killmap_tests <- tests |>
     filter(!fails_against_cut) |>
-    select(test_id, seconds_since_gamestart, game_id, llm_or_human) |>
-    rename(test_seconds = seconds_since_gamestart, test_game_id = game_id, test_actor = llm_or_human)
+    select(test_id, seconds_since_gamestart, game_id, author_llm_or_human) |>
+    rename(test_seconds = seconds_since_gamestart, test_game_id = game_id, test_actor = author_llm_or_human)
   
   killmap_mutants <- mutants |>
-    select(mutant_id, seconds_since_gamestart, game_id, llm_or_human) |>
-    rename(mutant_seconds = seconds_since_gamestart, mutant_game_id = game_id, mutant_actor = llm_or_human)
+    select(mutant_id, seconds_since_gamestart, game_id, author_llm_or_human) |>
+    rename(mutant_seconds = seconds_since_gamestart, mutant_game_id = game_id, mutant_actor = author_llm_or_human)
   
   canonical_killmaps <- read.csv("rawdata/killmaps/killmaps.csv", header = FALSE, col.names = c("test_id", "mutant_id", "state")) |>
     mutate(state = factor(state))
@@ -482,16 +497,28 @@ load_messages <- function(study) {
     mutate(
       rejection_reason = case_when(
         message_type != "SYSTEM" | index_in_conversation == 0 ~ NA,
-        startsWith(content, "Your mutant failed to compile.") ~ "mutant_compile_error",
-        startsWith(content, "Your mutant already exists.") ~ "mutant_already_exists",
-        startsWith(content, "Your mutant has violated the following rule:") ~ "mutant_rule_violation",
-        grepl("It did not pass on the original code for the following reason:", content, fixed = TRUE) ~ "test_failed_original",
-        startsWith(content, "Your test did not pass on the original code for") ~ "test_failed_original",
-        grepl("It has failed to compile for this reason:", content, fixed = TRUE) ~ "test_compile_error",
-        startsWith(content, "Your test failed to compile for this reason:") ~ "test_compile_error",
-        grepl("It has violated these rules:", content, fixed = TRUE) ~ "test_rule_violation",
-        startsWith(content, "Your test has violated these rules:") ~ "test_rule_violation",
-        .default = "other"
+        startsWith(content, "Your mutant failed to compile.") ~ "Mutant has compile error",
+        startsWith(content, "Your mutant already exists.") ~ "Mutant already exists",
+        grepl("Your mutant contains calls to System.*, Random.* or new control structures.", content, fixed = TRUE) ~ "Mutant includes a new system call, or a new control structure",
+        grepl("Your mutant contains prohibited operations such as bitshifts, ternary operators, added comments or multiple statments per line.", content, fixed = TRUE) ~ "Mutant has prohibited operations",
+        grepl("Your mutant adds a new method or field, or renames an existing one", content, fixed = TRUE) ~ "Mutant adds or renames a field or method",
+        grepl("Your mutant is identical to the CUT", content, fixed = TRUE) ~ "Mutant is identical to the CuT",
+        grepl("Your mutant contains new logical operations", content, fixed = TRUE) ~ "Mutant contains new logical operations",
+        startsWith(content, "Your mutant has violated the following rule:") ~ "Mutant violates a validation rule",
+        grepl("It did not pass on the original code for the following reason:", content, fixed = TRUE) ~ "Test fails on original",
+        startsWith(content, "Your test did not pass on the original code for") ~ "Test fails on original",
+        grepl("It has failed to compile for this reason:", content, fixed = TRUE) ~ "Test does not compile",
+        startsWith(content, "Your test failed to compile for this reason:") ~ "Test does not compile",
+        grepl("[Test contains a prohibited call", content, fixed = TRUE) ~ "Test has a prohibited call",
+        grepl("[Test contains more than 2 assertions", content, fixed = TRUE) ~ "Test has too many assertions",
+        grepl("[Test contains an invalid statement:", content, fixed = TRUE) ~ "Test includes an invalid statement",
+        grepl("[Test contains an invalid expression", content, fixed = TRUE) ~ "Test includes an invalid statement",
+        grepl("Invalid test suite contains more than one method declaration", content, fixed = TRUE) ~ "Test declares additional classes or methods",
+        grepl("Invalid test suite contains more than one class declaration", content, fixed = TRUE) ~ "Test declares additional classes or methods",
+        grepl("-[]", content, fixed = TRUE) ~ "Tests breaks an unknown rule",
+        grepl("It has violated these rules:", content, fixed = TRUE) ~ "Tests breaks an unknown rule",
+        startsWith(content, "Your test has violated these rules:") ~ "ERROR",
+        .default = "ERROR"
       )
     ) |>
     mutate(rejection_reason = factor(rejection_reason)) |>
@@ -583,12 +610,12 @@ questionnaire <- read.csv("rawdata/questionnaires/CodeDefenders_Questionare_LLM_
   unique()
 
 all_tests <- load_tests("userstudy") |>
-  left_join(questionnaire, join_by(username)) |>
-  left_join(survey, join_by(username, round)) |>
+  left_join(rename_to_author(questionnaire), join_by(author_username)) |>
+  left_join(rename_to_author(survey), join_by(author_username, round == author_round)) |>
   left_join(rename_to_opponent(questionnaire), join_by(opponent_username)) |>
   left_join(rename_to_opponent(survey), join_by(opponent_username, round == opponent_round)) %>%
   bind_rows(load_tests("llmvsllm")) |>
-  mutate(actor = factor(ifelse(llm_or_human == "LLM", "LLM", actor), 
+  mutate(author_actor = factor(ifelse(author_llm_or_human == "LLM", "LLM", author_actor), 
                         levels = c("low-skilled", "high-skilled", "LLM")
                         ),
          opponent_actor = factor(ifelse(opponent_llm_or_human == "LLM", "LLM", opponent_actor),
@@ -596,13 +623,13 @@ all_tests <- load_tests("userstudy") |>
          ))
 
 all_mutants <- load_mutants("userstudy") |>
-  left_join(questionnaire, join_by(username)) |>
-  left_join(survey, join_by(username, round)) |>
+  left_join(rename_to_author(questionnaire), join_by(author_username)) |>
+  left_join(rename_to_author(survey), join_by(author_username, round == author_round)) |>
   left_join(rename_to_opponent(questionnaire), join_by(opponent_username)) |>
   left_join(rename_to_opponent(survey), join_by(opponent_username, round == opponent_round)) |>
   bind_rows(load_mutants("llmvsllm")) |>
   mutate(
-    actor = factor(ifelse(llm_or_human == "LLM", "LLM", actor),
+    author_actor = factor(ifelse(author_llm_or_human == "LLM", "LLM", author_actor),
                         levels = c("low-skilled", "high-skilled", "LLM")
                    ),
     opponent_actor = factor(ifelse(opponent_llm_or_human == "LLM", "LLM", opponent_actor),
@@ -610,9 +637,51 @@ all_mutants <- load_mutants("userstudy") |>
     ),
   )
 
-# TODO  WICHTIG!!! Nach experiment-games filtern
+
+
+
+
+# Killmaps data for tests contains 2 rows with NAs: One test has no coverage and
+#therefore no killed/ignored mutants, these values should be changed to 0.
+# The very first test doesn't show up in the dedup data. I will have to figure
+#out why that is. Until then, they remain as NA.
+tmp <- killmap_data(tests = filter(all_tests, is_compiled), mutants = filter(all_mutants, is_compiled))
+tests <- tmp$tests
+mutants <- tmp$mutants
+rm(tmp)
+
+deftests <- tests |> 
+  filter(!is_equivalence_test, !fails_against_cut)
+
+defender_games <- deftests |>
+  group_by(
+    game_id, 
+    across(starts_with("author_")), 
+    across(starts_with("opponent_")),
+    cut,
+    round
+  ) |>
+  summarise(
+    points = sum(points), .groups = "drop_last"
+  )
+
+attacker_games <- mutants |>
+  group_by(
+    game_id, 
+    across(starts_with("author_")), 
+    across(starts_with("opponent_")),
+    cut,
+    round
+  ) |>
+  summarise(
+    points = sum(points), .groups = "drop_last"
+  )
+
 all_messages <- load_messages("userstudy") |>
-  bind_rows(load_messages("llmvsllm"))
+  bind_rows(load_messages("llmvsllm")) |>
+  inner_join(defender_games, join_by(game_id)) |>
+  rename_with(.cols = starts_with("author"), \(text) sub("author", "defender", text)) |>
+  rename_with(.cols = starts_with("opponent"), \(text) sub("opponent", "attacker", text))
 
 all_conversations <- all_messages |>
   mutate(value = 1) |>
@@ -627,22 +696,4 @@ all_conversations <- all_messages |>
     output_tokens = sum(output_tokens),
     across(starts_with("rejection_"), sum),
     .by = c(conversation_id, game_id, strategy, type, user_id, mutant_id, test_id, is_success)
-  ) |>
-  filter(
-    
   )
-
-
-# Killmaps data for tests contains 2 rows with NAs: One test has no coverage and
-#therefore no killed/ignored mutants, these values should be changed to 0.
-# The very first test doesn't show up in the dedup data. I will have to figure
-#out why that is. Until then, they remain as NA.
-tmp <- killmap_data(tests = filter(all_tests, is_compiled), mutants = filter(all_mutants, is_compiled))
-tests <- tmp$tests
-mutants <- tmp$mutants
-rm(tmp)
-
-
-
-deftests <- tests |> 
-  filter(!is_equivalence_test, !fails_against_cut)

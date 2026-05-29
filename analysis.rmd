@@ -29,6 +29,8 @@ source("scripts/load_data.R")
 colors.opinion <- c("red", "orange", "grey", "cyan", "blue")
 colors.actor <- c("turquoise3", "thistle4")
 colors.quality <- c("#458B00", "darkgoldenrod3", "#8B1C62", "red4")
+colors.red <- "#BA2F2A"
+colors.green <- "#088158"
 
 scale_defender <- scale_fill_manual(values = colors.actor, name = "Defender")
 scale_attacker <- scale_fill_manual(values = colors.actor, name = "Attacker")
@@ -51,7 +53,7 @@ scale_default_grouping <- function(type) {
     stop("type must be t or m")
   }
   list(
-    aes(x = llm_or_human, fill = opponent_llm_or_human),
+    aes(x = author_llm_or_human, fill = opponent_llm_or_human),
     facet_wrap( ~ cut),
     labs(x = ifelse(type == "t", "Defender", "Attacker"), 
          fill = ifelse(type == "t", "Attacker", "Defender"),)
@@ -63,7 +65,7 @@ binary_mean_cols <- function(.data, y, type) {
   .data |>
     summarise(
       {{y}} := mean({{y}}),
-      .by = c(llm_or_human, opponent_llm_or_human, cut)
+      .by = c(author_llm_or_human, opponent_llm_or_human, cut)
     ) |>
     ggplot(aes(y = {{y}})) +
     scale_default_grouping(type) +
@@ -80,14 +82,14 @@ interpretation.opponent_opinion_human_or_ai <- as.factor(c(
   
 number_of_test_games <- tests[!tests$is_equivalence_test,] |>
   group_by(
-    llm_or_human,
+    author_llm_or_human,
   ) |>
   summarise(
     n = n_distinct(game_id)
   )
 number_of_mutant_games <- mutants |>
   group_by(
-    llm_or_human,
+    author_llm_or_human,
   ) |>
   summarise(
     n = n_distinct(game_id)
@@ -204,13 +206,13 @@ We normalize the variables for better comparability.
 
 ```{r}
 testmodel <- deftests |>
-  filter(llm_or_human == "Human") |>
-  normalise(number_correct_questions, java_experience, junit_experience, semester) %>%
+  filter(author_llm_or_human == "Human") |>
+  normalise(author_number_correct_questions, author_java_experience, author_junit_experience, author_semester) %>%
   lm(data = .,
-        kill_rate ~ number_correct_questions 
-          + java_experience
-          + junit_experience
-          + semester 
+        kill_rate ~ author_number_correct_questions 
+          + author_java_experience
+          + author_junit_experience
+          + author_semester 
           + round 
           + cut 
           + opponent_llm_or_human
@@ -223,7 +225,7 @@ testmodel
 Result: Of the proposed variables, only *JUnit-Experience* has an effect on
 _kill rate_ that is significant to a level of 5%. The difference between those
 of lowest experience and those of highest experience
-increases evasion rate by `r estimate(testmodel, "junit_experience")`.
+increases evasion rate by `r estimate(testmodel, "author_junit_experience")`.
 
 Overall, the model explains
 `r r.sq(testmodel)` of the total variation.
@@ -235,13 +237,13 @@ We repeat this procedure for mutants, checking for *evasion rate*.
 ```{r}
 
 mutantmodel <- mutants |>
-  filter(llm_or_human == "Human") |>
-  normalise(number_correct_questions, java_experience, junit_experience, semester) %>%
+  filter(author_llm_or_human == "Human") |>
+  normalise(author_number_correct_questions, author_java_experience, author_junit_experience, author_semester) %>%
   lm(data = .,
-        evasion_rate ~ number_correct_questions 
-          + java_experience
-          + junit_experience
-          + semester 
+        evasion_rate ~ author_number_correct_questions 
+          + author_java_experience
+          + author_junit_experience
+          + author_semester 
           + round 
           + cut 
           + opponent_llm_or_human
@@ -253,13 +255,13 @@ mutantmodel
 
 This paints a very different picture than the analysis for tests: The 
 _number of correctly answered questions_ is positively correlated to 
-_evasion rate_ (`r estimate(mutantmodel, "number_correct_questions")`), 
-as is _JUnit experience_ (`r estimate(mutantmodel, "junit_experience")`). 
+_evasion rate_ (`r estimate(mutantmodel, "author_number_correct_questions")`), 
+as is _JUnit experience_ (`r estimate(mutantmodel, "author_junit_experience")`). 
 _Java Experience_ however is negatively correlated 
-(`r estimate(mutantmodel, "java_experience")`), as is _semester_
-(`r estimate(mutantmodel, "semester")`), although _semester_ no longer fits
+(`r estimate(mutantmodel, "author_java_experience")`), as is _semester_
+(`r estimate(mutantmodel, "author_semester")`), although _semester_ no longer fits
 the significance level of 5% with a p-value of 
-`r p.value(mutantmodel, "semester")`. Overall, this only explains 
+`r p.value(mutantmodel, "author_semester")`. Overall, this only explains 
 `r r.sq(mutantmodel)` of the total variation, much less than for tests.
 
 ### Calculating a skill metric
@@ -282,7 +284,7 @@ below the median), and high-skilled human (skill is above the median).
 ```{r}
 deftests |>
   filter(!is.na(kill_rate)) |>
-  ggplot(aes(x = actor, fill = actor, y = kill_rate)) +
+  ggplot(aes(x = author_actor, fill = author_actor, y = kill_rate)) +
   geom_boxplot() +
   labs(fill = NULL, y = "Killrate", x = "Defender")
   
@@ -300,7 +302,7 @@ an LLM player
 
 ```{r}
 mutants |>
-  filter(llm_or_human == "Human") |>
+  filter(author_llm_or_human == "Human") |>
   ggplot(aes(y = evasion_rate, x = round)) +
   geom_boxplot()
 ```
@@ -339,7 +341,7 @@ deftests |>
                                    "Against existing mutants",
                                    "Against future mutants"
                                  ))) |>
-  ggplot(aes(x = llm_or_human, y = kill_rate_value, fill = opponent_llm_or_human)) + 
+  ggplot(aes(x = author_llm_or_human, y = kill_rate_value, fill = opponent_llm_or_human)) + 
     geom_boxplot(position = "dodge") + 
     xlab("Defender") +
     scale_y_continuous(name = "Kill rate", labels = percent) + 
@@ -355,7 +357,7 @@ Most tests only directly kill 0 or 1 mutants.
 
 ```{r}
 deftests |>
-  ggplot(aes(x = llm_or_human, y = fresh_killed_mutants, fill = opponent_llm_or_human)) +
+  ggplot(aes(x = author_llm_or_human, y = fresh_killed_mutants, fill = opponent_llm_or_human)) +
   geom_boxplot() +
   xlab("Defender") + 
   ylab("Number of killed mutants") +
@@ -372,8 +374,8 @@ defenders, so every test has more mutants available to kill.
 
 ```{r}
 deftests |>
-  summarise(fresh_killed_mutants = mean(fresh_killed_mutants), .by = c(llm_or_human, opponent_llm_or_human, cut)) |>
-  ggplot(aes(x = llm_or_human, y = fresh_killed_mutants, fill = opponent_llm_or_human)) +
+  summarise(fresh_killed_mutants = mean(fresh_killed_mutants), .by = c(author_llm_or_human, opponent_llm_or_human, cut)) |>
+  ggplot(aes(x = author_llm_or_human, y = fresh_killed_mutants, fill = opponent_llm_or_human)) +
   geom_col(position = "dodge") +
   geom_text(aes(label = round(fresh_killed_mutants, digits = 2)), position = position_dodge(0.9), vjust = 1.5) +
   scale_fill_manual(values = colors.actor, name = "Attacker") +
@@ -410,7 +412,7 @@ mutants |>
                                    "Against existing tests",
                                    "Against future tests"
                                  ))) |>
-  ggplot(aes(x = llm_or_human, y = evasion_rate_value, fill = opponent_llm_or_human)) + 
+  ggplot(aes(x = author_llm_or_human, y = evasion_rate_value, fill = opponent_llm_or_human)) + 
     geom_boxplot(position = "dodge") + 
     xlab("Attacker") +
     scale_y_continuous(name = "Evasion rate", labels = percent) + 
@@ -429,7 +431,7 @@ As we can see, most tests score very low, with some exceptionally high outliers.
 ```{r}
 point_boxplot <- function(.data, author = "Author", opponent = "Opponent") {
   .data |>
-    ggplot(aes(x = llm_or_human, y = points, fill = opponent_llm_or_human)) + 
+    ggplot(aes(x = author_llm_or_human, y = points, fill = opponent_llm_or_human)) + 
     geom_boxplot() +
     scale_fill_manual(values = colors.actor, name = opponent) +
     xlab(author) +
@@ -458,9 +460,9 @@ The difference is small (TODO significance?) in `CharRange`, larger in `ByteVect
 
 ```{r}
 deftests |>
-  group_by(llm_or_human, opponent_llm_or_human, cut) |>
+  group_by(author_llm_or_human, opponent_llm_or_human, cut) |>
   summarise(mean_points = mean(points)) |>
-  ggplot(aes(x = llm_or_human, y = mean_points, fill = opponent_llm_or_human)) +
+  ggplot(aes(x = author_llm_or_human, y = mean_points, fill = opponent_llm_or_human)) +
   geom_col(position = "dodge") +
   geom_text(
     aes(label = mean_points |> round(2)), 
@@ -498,9 +500,9 @@ generally higher for human attackers, especially in `ByteVector`.
 
 ```{r}
 deftests |>
-  group_by(llm_or_human, opponent_llm_or_human, cut) |>
+  group_by(author_llm_or_human, opponent_llm_or_human, cut) |>
   summarise(mean_points = mean(points)) |>
-  ggplot(aes(x = llm_or_human, y = mean_points, fill = opponent_llm_or_human)) +
+  ggplot(aes(x = author_llm_or_human, y = mean_points, fill = opponent_llm_or_human)) +
   geom_col(position = "dodge") +
   geom_text(
     aes(label = mean_points |> round(2)), 
@@ -531,7 +533,7 @@ deftests |>
     point_ntil = ntile(points, n = 10)
   ) |>
   group_by(point_ntil) |>
-  ggplot(aes(y = kill_rate, x = factor(point_ntil), fill = llm_or_human)) +
+  ggplot(aes(y = kill_rate, x = factor(point_ntil), fill = author_llm_or_human)) +
     geom_boxplot() +
     scale_fill_manual(values = colors.actor, name = "Defender") + 
     ggtitle("Kill rates vs Points for tests") +
@@ -548,7 +550,7 @@ mutants |>
     point_ntil = ntile(points, n = 10)
   ) |>
   group_by(point_ntil) |>
-  ggplot(aes(y = evasion_rate, x = factor(point_ntil), fill = llm_or_human)) +
+  ggplot(aes(y = evasion_rate, x = factor(point_ntil), fill = author_llm_or_human)) +
     geom_boxplot() +
     scale_fill_manual(values = colors.actor, name = "Attacker") + 
     ggtitle("Evasion rates vs Points for mutants") +
@@ -581,16 +583,16 @@ timelineplot <- function(.data) {
   mutate(seconds_since_gamestart = floor(seconds_since_gamestart / 60)) |>
     rename(`Minutes since gamestart` = seconds_since_gamestart) |>
     mutate(
-      part = as.numeric(ifelse(llm_or_human == "LLM",
-                    1 / number_of_test_games[number_of_test_games$llm_or_human == "LLM","n"],
-                    1 / number_of_test_games[number_of_test_games$llm_or_human == "Human","n"]
+      part = as.numeric(ifelse(author_llm_or_human == "LLM",
+                    1 / number_of_test_games[number_of_test_games$author_llm_or_human == "LLM","n"],
+                    1 / number_of_test_games[number_of_test_games$author_llm_or_human == "Human","n"]
                     ))
     ) |>
-    group_by(`Minutes since gamestart`, llm_or_human, cut) |>
+    group_by(`Minutes since gamestart`, author_llm_or_human, cut) |>
     summarise(
       part = sum(part)
     ) |>
-  ggplot(aes(x = `Minutes since gamestart`, y = part, colour = llm_or_human)) +
+  ggplot(aes(x = `Minutes since gamestart`, y = part, colour = author_llm_or_human)) +
     geom_line() +
     facet_wrap( ~ cut)
 }
@@ -625,7 +627,7 @@ as part of the initial test suite and were successfully submitted on first try.
 
 ```{r}
 deftests|>
-  filter(llm_or_human == "LLM") |>
+  filter(author_llm_or_human == "LLM") |>
   mutate(number_of_messages = ifelse(is.na(number_of_messages), 0, number_of_messages)) |>
   mutate(number_of_messages = factor(number_of_messages,
                                      levels = c(0, 1,2,3,4),
@@ -643,7 +645,7 @@ deftests|>
 
 ```{r}
 mutants|>
-  filter(llm_or_human == "LLM") |>
+  filter(author_llm_or_human == "LLM") |>
   mutate(number_of_messages = factor(number_of_messages,
                                      levels = c(0, 1,2,3,4),
                                      labels = c("Suite", "1", "2", "3", "4"))) |>
@@ -667,10 +669,10 @@ but mutants are hardly distinguishable.
 ```{r}
 deftests |>
   filter(opponent_llm_or_human == "Human") |>
-  group_by(game_id, username, opponent_opinion_human_or_ai, llm_or_human) |>
+  group_by(game_id, author_username, opponent_opinion_human_or_ai, author_llm_or_human) |>
   mutate(opponent_opinion_human_or_ai = factor(opponent_opinion_human_or_ai, levels = 1:5, labels = interpretation.opponent_opinion_human_or_ai)) |>
   summarise(n = n()) |>
-  ggplot(aes(x = llm_or_human, y = n, fill = opponent_opinion_human_or_ai)) + 
+  ggplot(aes(x = author_llm_or_human, y = n, fill = opponent_opinion_human_or_ai)) + 
     geom_col(position = "fill", name = "Proportion") +
     scale_fill_manual(name = "Attacker's guess", values = colors.opinion) +
     xlab("Defender") +
@@ -683,10 +685,10 @@ deftests |>
 ```{r}
 mutants |>
   filter(opponent_llm_or_human == "Human") |>
-  group_by(game_id, username, opponent_opinion_human_or_ai, llm_or_human) |>
+  group_by(game_id, author_username, opponent_opinion_human_or_ai, author_llm_or_human) |>
   mutate(opponent_opinion_human_or_ai = factor(opponent_opinion_human_or_ai, levels = 1:5, labels = interpretation.opponent_opinion_human_or_ai)) |>
   summarise(n = n()) |>
-  ggplot(aes(x = llm_or_human, y = n, fill = opponent_opinion_human_or_ai)) + 
+  ggplot(aes(x = author_llm_or_human, y = n, fill = opponent_opinion_human_or_ai)) + 
     geom_col(position = "fill", name = "Proportion") +
     scale_fill_manual(name = "Defender's guess", values = colors.opinion) +
     scale_y_continuous(labels = percent) +
@@ -719,7 +721,7 @@ There are, however, only very slight differences in total evasion rates
 between stillborn and not-stillborn mutants.
 
 ```{r}
-ggplot(data = mutants, aes(x = is_stillborn, y = evasion_rate, fill = llm_or_human)) +
+ggplot(data = mutants, aes(x = is_stillborn, y = evasion_rate, fill = author_llm_or_human)) +
   geom_boxplot(position = "dodge") +
   scale_fill_manual(name = "Attacker", values = colors.actor) +
   scale_y_continuous(labels = percent, name = "Evasion rate") +
@@ -756,7 +758,7 @@ other combinations.
 
 mutants |>
   group_by(
-    llm_or_human,
+    author_llm_or_human,
     declared_equivalent,
     opponent_llm_or_human
   ) |>
@@ -767,7 +769,7 @@ mutants |>
     opponent_llm_or_human = paste(opponent_llm_or_human, "Defender")
   ) |>
   ggplot(
-    aes(x = declared_equivalent, y = not_killed, fill = llm_or_human)
+    aes(x = declared_equivalent, y = not_killed, fill = author_llm_or_human)
     ) +
     geom_col(position = "dodge") +
     geom_text(aes(
@@ -785,7 +787,7 @@ mutants |>
 ```{r}
 mutants |>
   group_by(
-    llm_or_human,
+    author_llm_or_human,
     opponent_llm_or_human,
     has_been_killed
   ) |>
@@ -796,7 +798,7 @@ mutants |>
     opponent_llm_or_human = paste(opponent_llm_or_human, "Defender")
   ) |>
   ggplot(
-    aes(x = has_been_killed, y = declared_equivalent, fill = llm_or_human)
+    aes(x = has_been_killed, y = declared_equivalent, fill = author_llm_or_human)
     ) +
     geom_col(position = "dodge") +
     facet_wrap( ~ opponent_llm_or_human,) + 
@@ -838,7 +840,7 @@ LLM generated tests cover slightly more lines than human written tests.
 
 ```{r}
 deftests |>
-  ggplot(aes(x = llm_or_human, y = number_lines_covered, fill = opponent_llm_or_human)) +
+  ggplot(aes(x = author_llm_or_human, y = number_lines_covered, fill = opponent_llm_or_human)) +
   geom_boxplot() +
   scale_fill_manual(values = colors.actor, name = "Attacker") +
   facet_wrap( ~ cut) +
@@ -854,7 +856,7 @@ illegal for human players, but permitted to LLM players.
 
 ```{r}
 mutants |>
-  ggplot(aes(x = llm_or_human, y = number_mutated_lines, fill = opponent_llm_or_human)) +
+  ggplot(aes(x = author_llm_or_human, y = number_mutated_lines, fill = opponent_llm_or_human)) +
   geom_boxplot() +
   scale_fill_manual(values = colors.actor, name = "Defender") +
   xlab("Attacker") + 
@@ -878,15 +880,15 @@ in the same plot
 coverage_plot <- function(.data, lines_variable_name) {
   .data |>
     rename(.lines = {{lines_variable_name}}) |>
-    select(llm_or_human, opponent_llm_or_human, .lines) |>
+    select(author_llm_or_human, opponent_llm_or_human, .lines) |>
     separate_longer_delim(.lines, delim=",") |>
-    group_by(llm_or_human, opponent_llm_or_human, .lines) |>
+    group_by(author_llm_or_human, opponent_llm_or_human, .lines) |>
     summarise(n = n() ) |>
     ungroup() |>
     mutate(.lines = as.numeric(.lines)) |>
     ggplot(aes(x = .lines, y = n)) +
     geom_col() +
-    facet_grid(llm_or_human ~ opponent_llm_or_human) +
+    facet_grid(author_llm_or_human ~ opponent_llm_or_human) +
     scale_y_continuous()
 }
 
@@ -924,35 +926,6 @@ mutants |>
 The following statistics are about entire games, not about individual tests
 and mutants.
 
-```{r}
-defender_games <- deftests |>
-  group_by(
-    game_id, 
-    username, 
-    across(starts_with("author_")), 
-    across(starts_with("opponent_")),
-    llm_or_human,
-    cut,
-    round
-    ) |>
-  summarise(
-    points = sum(points)
-  )
-
-attacker_games <- mutants |>
-  group_by(
-    game_id, 
-    username, 
-    across(starts_with("author_")), 
-    across(starts_with("opponent_")),
-    llm_or_human,
-    cut,
-    round
-    ) |>
-  summarise(
-    points = sum(points)
-  )
-```
 ## Total points
 
 These plots show the total number of points players earned in a game.
@@ -962,7 +935,7 @@ to earn more points against human defenders than against LLM defenders.
 
 ```{r}
 defender_games |>
-  ggplot(aes(y = points, x = llm_or_human, fill = opponent_llm_or_human)) +
+  ggplot(aes(y = points, x = author_llm_or_human, fill = opponent_llm_or_human)) +
   geom_boxplot() +
   scale_fill_manual(name = "Attacker", values = colors.actor) +
   ylab("Points") +
@@ -973,7 +946,7 @@ defender_games |>
 
 ```{r}
 attacker_games |>
-  ggplot(aes(y = points, x = llm_or_human, fill = opponent_llm_or_human)) +
+  ggplot(aes(y = points, x = author_llm_or_human, fill = opponent_llm_or_human)) +
   geom_boxplot(position = position_dodge(0.9)) +
   scale_fill_manual(name = "Defender", values = colors.actor) +
   ylab("Points") +
@@ -1005,11 +978,11 @@ games <- attacker_games |>
   select(!starts_with("opponent"))
 
 games |>
-  group_by(llm_or_human.attacker, llm_or_human.defender, cut) |>
+  group_by(author_llm_or_human.attacker, author_llm_or_human.defender, cut) |>
   summarise(
     defender_winrate = mean(points.defender > points.attacker)
     ) |>
-  ggplot(aes(x = llm_or_human.defender, fill = llm_or_human.attacker, 
+  ggplot(aes(x = author_llm_or_human.defender, fill = author_llm_or_human.attacker, 
              y = defender_winrate, label = percent(defender_winrate))) +
   geom_col(position = "dodge") +
   scale_fill_manual(values = colors.actor, name = "Attacker") + 
@@ -1022,11 +995,11 @@ games |>
 
 ```{r}
 games |>
-  group_by(llm_or_human.attacker, llm_or_human.defender, cut) |>
+  group_by(author_llm_or_human.attacker, author_llm_or_human.defender, cut) |>
   summarise(
     attacker_winrate = mean(points.defender < points.attacker)
     ) |>
-  ggplot(aes(x = llm_or_human.attacker, fill = llm_or_human.defender, 
+  ggplot(aes(x = author_llm_or_human.attacker, fill = author_llm_or_human.defender, 
              y = attacker_winrate, label = percent(attacker_winrate))) +
   geom_col(position = "dodge") +
   scale_fill_manual(values = colors.actor, name = "Defender") + 
@@ -1049,7 +1022,7 @@ they are still remarkable. TODO Quantify!
 ```{r}
 games |>
   mutate(point_ratio = points.defender / ifelse(points.attacker != 0, points.attacker, 1)) |>
-  ggplot(aes(x = llm_or_human.defender, fill = llm_or_human.attacker, y = point_ratio)) +
+  ggplot(aes(x = author_llm_or_human.defender, fill = author_llm_or_human.attacker, y = point_ratio)) +
   geom_boxplot() +
   scale_fill_manual(values = colors.actor, name = "Attacker") +
   xlab("Defender") +
@@ -1091,7 +1064,7 @@ attempt at each failure.
 
 ```{r}
 mutants |>
-  filter(llm_or_human == "LLM") |>
+  filter(author_llm_or_human == "LLM") |>
   pivot_longer(
     cols = c(input_tokens, output_tokens),
     names_to = "token_type",
@@ -1147,7 +1120,7 @@ This only covers tests
 
 ```{r}
 tests |>
-  filter(llm_or_human == "LLM") |>
+  filter(author_llm_or_human == "LLM") |>
   pivot_longer(
     cols = c(input_tokens, output_tokens),
     names_to = "token_type",
@@ -1215,9 +1188,32 @@ not compiled, and tests that fail on the original class.
 
 ## Validation errors for LLMs
 
+While no such data exists for human submissions, we can extract the replies to
+the LLM for rejected submissions. There are some caveats to consider:
+
+The validation system in the CodeDefenders build used during the study is
+imprecise and often buggy. 
+
 ```{r}
 all_messages |>
   filter(user_id == 6) |>
+  summarise(n = n(), .by = c(rejection_reason, is_success)) |>
+  filter(!is.na(rejection_reason)) |>
+  mutate(is_success = ifelse(is_success, "Eventually successful", "Not eventually successful")) |>
+  ggplot(aes(fill = rejection_reason, y = n, x = "")) +
+  geom_col(position = "dodge") +
+  labs(title = "Rejection reasons for defender tests",
+       x = NULL,#"Conversation is eventually successful",
+       y = "Number of failed attemps",
+       fill = "Rejection reason") +
+  geom_text(aes(label = after_stat(y)), position = position_dodge(0.9), vjust = -0.2) +
+  facet_wrap( ~ is_success)
+```
+
+
+```{r}
+all_messages |>
+  filter(user_id == 5) |>
   summarise(n = n(), .by = c(rejection_reason, is_success)) |>
   filter(!is.na(rejection_reason)) |>
   #pivot_longer(cols = starts_with("rejection_"), 
@@ -1227,7 +1223,7 @@ all_messages |>
   #filter(rejection_type != "rejection_NA") |>
   ggplot(aes(fill = rejection_reason, y = n, x = is_success)) +
   geom_col(position = "fill") +
-  labs(title = "Rejection reasons for defender tests",
+  labs(title = "Rejection reasons for attacker tests",
        x = "Conversation is eventually successful",
        y = "Percentage of failed attempts",
        fill = "Rejection reason")
