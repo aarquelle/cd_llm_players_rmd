@@ -516,7 +516,7 @@ load_messages <- function(study) {
         grepl("Invalid test suite contains more than one method declaration", content, fixed = TRUE) ~ "Test declares additional classes or methods",
         grepl("Invalid test suite contains more than one class declaration", content, fixed = TRUE) ~ "Test declares additional classes or methods",
         grepl("-[]", content, fixed = TRUE) ~ "Tests breaks an unknown rule",
-        grepl("It has violated these rules:", content, fixed = TRUE) ~ "Tests breaks an unknown rule",
+        grepl("It has violated these rules:", content, fixed = TRUE) ~ "Test breaks an unknown rule",
         startsWith(content, "Your test has violated these rules:") ~ "ERROR",
         .default = "ERROR"
       )

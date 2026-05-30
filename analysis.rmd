@@ -35,12 +35,12 @@ colors.green <- "#088158"
 scale_defender <- scale_fill_manual(values = colors.actor, name = "Defender")
 scale_attacker <- scale_fill_manual(values = colors.actor, name = "Attacker")
 
-scale_percentage_bars <- function(dodge_value = 0.9, vjust = 1.5) {
+scale_percentage_bars <- function(dodge_value = 0.9, vjust = -0.2, with.percent = TRUE) {
   list(
-  scale_y_continuous(labels = percent),
+  if (with.percent) scale_y_continuous(labels = percent) else scale_y_continuous(),
   geom_col(position = "dodge"),
   geom_text(
-    aes(label = percent(after_stat(y), accuracy = 0.1)),
+    aes(label = if(with.percent) percent(after_stat(y), accuracy = 0.1) else round(after_stat(y), digits = 2)),
     position = position_dodge(dodge_value), 
     vjust = vjust
     )
@@ -61,7 +61,7 @@ scale_default_grouping <- function(type) {
   )
 }
 
-binary_mean_cols <- function(.data, y, type) {
+binary_mean_cols <- function(.data, y, type, with.percent = TRUE) {
   .data |>
     summarise(
       {{y}} := mean({{y}}),
@@ -69,7 +69,7 @@ binary_mean_cols <- function(.data, y, type) {
     ) |>
     ggplot(aes(y = {{y}})) +
     scale_default_grouping(type) +
-    scale_percentage_bars()
+    scale_percentage_bars(with.percent = with.percent)
 }
 
 interpretation.opponent_opinion_human_or_ai <- as.factor(c(
@@ -129,8 +129,10 @@ r.sq <- function(model) {
 NOTE: I don't think this is really useful, after all. 
 There are only 24 players, so there are only 12 players for each role.
 Dividing these into two groups based on skill level leaves only 6 players in
-each group (role + class + skill level), with only a very dodgy theoretical
-reasoning as to why this classification should matter at all.
+each role, with only a very dodgy theoretical
+reasoning as to why this classification should matter at all. Further grouping -
+by opponent or CuT, for example - would lead to groups with only a single player,
+or no player at all. ENDNOTE
 
 In the questionnaire, study participants could enter their semester, their
 experience with Java and JUnit, respectively, and they had to answer a short
@@ -292,6 +294,9 @@ deftests |>
 ```
 # Influence of experiment round
 
+Note: Such diagrams are probably not necessary, now that we have the regression
+model above.
+
 Users played two different games:
 
 - In both games, they played the same role, either attacker or defender.
@@ -375,13 +380,8 @@ defenders, so every test has more mutants available to kill.
 ```{r}
 deftests |>
   summarise(fresh_killed_mutants = mean(fresh_killed_mutants), .by = c(author_llm_or_human, opponent_llm_or_human, cut)) |>
-  ggplot(aes(x = author_llm_or_human, y = fresh_killed_mutants, fill = opponent_llm_or_human)) +
-  geom_col(position = "dodge") +
-  geom_text(aes(label = round(fresh_killed_mutants, digits = 2)), position = position_dodge(0.9), vjust = 1.5) +
-  scale_fill_manual(values = colors.actor, name = "Attacker") +
-  ylab("Number of fresh mutant kills") +
-  xlab("Defender") +
-  facet_wrap( ~ cut)
+  binary_mean_cols(fresh_killed_mutants, "t", with.percent = FALSE) +
+  labs(y = "Average kills", title = "Fresh killed mutants")
 ```
 
 
@@ -873,53 +873,227 @@ mutants |>
 ```
 ## Which lines were covered and mutated?
 
-TODO: Normalise for per-game averages, compare mutations and coverage
-in the same plot
+The following plots show which lines were covered and mutated by tests and
+mutants, respectively. We can see some interesting patterns: There are only
+minor differences depending on the attacker, LLM defenders were much more
+likely to cover a collection of lines at the end of CharRange, and LLM 
+attackers focused a majority of their attacks on a single cluster of lines,
+while human attackers (as a whole) distributed their attacks more evenly across
+the CuT.
 ```{r}
 
-coverage_plot <- function(.data, lines_variable_name) {
+coverage_plot <- function(.data, type) {
+  if (! type %in% c("t", "m")) {
+    stop("type must be t or m")
+  }
+  old_lines <- if (type == "t") "lines_covered" else "mutatedlines"
+  old_id <- if (type == "t") "test_id" else "mutant_id"
+  
   .data |>
-    rename(.lines = {{lines_variable_name}}) |>
-    select(author_llm_or_human, opponent_llm_or_human, .lines) |>
+    rename(.lines = !!sym(old_lines)) |>
+    rename(.id = !!sym(old_id)) |>
+    select(author_llm_or_human, opponent_llm_or_human, .lines, .id) |>
     separate_longer_delim(.lines, delim=",") |>
-    group_by(author_llm_or_human, opponent_llm_or_human, .lines) |>
-    summarise(n = n() ) |>
-    ungroup() |>
-    mutate(.lines = as.numeric(.lines)) |>
-    ggplot(aes(x = .lines, y = n)) +
+    unique() |>
+    mutate(linecount = 1) |>
+    pivot_wider(
+      names_from = .lines, 
+      values_from = linecount, 
+      names_prefix = "lineno_",
+      values_fill = 0
+      ) |>
+    summarise(across(starts_with("lineno_"), mean), .by = c(
+      "author_llm_or_human",
+      "opponent_llm_or_human"
+    )) |>
+    pivot_longer(
+      cols = starts_with("lineno_"),
+      names_to = "line_number",
+      names_prefix = "lineno_",
+      values_to = "line_mean",
+      names_transform = as.integer
+    ) |>
+    mutate(
+      author_llm_or_human = paste(author_llm_or_human, if (type == "t") "Defender" else "Attacker"),
+      opponent_llm_or_human = paste(opponent_llm_or_human, if (type == "m") "Defender" else "Attacker")) |>
+    ggplot(aes(x = line_number, y = line_mean)) +
     geom_col() +
     facet_grid(author_llm_or_human ~ opponent_llm_or_human) +
-    scale_y_continuous()
+    scale_y_continuous(labels = percent)
 }
 
 deftests |>
   filter(cut == "CharRange") |>
-  coverage_plot(lines_covered) +
-  ggtitle("Coverage for CharRange")
+  coverage_plot("t") +
+  labs(title = "Coverage for CharRange", y = "Tests that cover this line", x = "Line number")
 ```
 
 ```{r}
 deftests |>
   filter(cut == "ByteVector") |>
-  coverage_plot(lines_covered) +
-  ggtitle("Coverage for ByteVector")
+  coverage_plot("t") +
+  labs(title = "Coverage for ByteVector", y = "Tests that cover this line", x = "Line number")
 ```
 
 ```{r}
 mutants |>
   filter(cut == "CharRange") |>
-  coverage_plot(mutatedlines) +
-  ggtitle("Mutations for CharRange")
+  coverage_plot("m") +
+  labs(title = "Mutations for CharRange", y = "Mutants that change this line", x = "Line number")
 ```
 
 ```{r}
 mutants |>
   filter(cut == "ByteVector") |>
-  coverage_plot(mutatedlines) +
-  ggtitle("Mutations for CharRange")
+  coverage_plot("m") +
+  labs(title = "Mutations for ByteVector", y = "Mutants that change this line", x = "Line number")
+```
+## Which methods were covered and mutated?
+
+The plots above are difficult to parse, so we will map the line numbers to methods.
+
+```{r}
+CharRange_mapping <- function(l) {
+  l <- as.integer(l)
+  case_when(
+    l < 6 ~ "Documentation",
+    l < 8 ~ "Class declaration",
+    l < 18 ~ "Fields",
+    l < 45 ~ "Constructor",
+    l < 57 ~ "is()",
+    l < 69 ~ "isNot()",
+    l < 82 ~ "isIn()",
+    l < 95 ~ "isNotIn()",
+    l < 106 ~ "getStart()",
+    l < 115 ~ "getEnd()",
+    l < 127 ~ "isNegated()",
+    l < 139 ~ "contains(char)",
+    l < 161 ~ "contains(CharRange)",
+    l < 184 ~ "equals()",
+    l < 194 ~ "hashCode()",
+    l <= 217 ~ "toString()"
+  )
+}
+
+ByteVector_mapping <- function(l) {
+  l <- as.integer(l)
+  case_when(
+    l < 6 ~ "Documentation",
+    l < 8 ~ "Class declaration",
+    l < 18 ~ "Fields",
+    l < 26 ~ "ByteVector()",
+    l < 36 ~ "ByteVector(int)",
+    l < 53 ~ "putByte()",
+    l < 73 ~ "put11()",
+    l < 92 ~ "putShort()",
+    l < 113 ~ "put12()",
+    l < 134 ~ "putInt()",
+    l < 161 ~ "putLong()",
+    l < 226 ~ "putUTF8()",
+    l < 248 ~ "putByteArray()",
+    l <= 262 ~ "enlarge()"
+  )
+}
+
+method_coverage_plot <- function(.data, type) {
+  if (! type %in% c("t", "m")) {
+    stop("type must be t or m")
+  }
+  old_lines <- if (type == "t") "lines_covered" else "mutatedlines"
+  old_id <- if (type == "t") "test_id" else "mutant_id"
+  mapping <- if (.data[1,"cut"] == "ByteVector") ByteVector_mapping else CharRange_mapping
+  #TODO: Would be a bit more elegant to do this in every row, to allow for
+  # mixed input
+  
+  .data |>
+    rename(.lines = !!sym(old_lines)) |>
+    rename(.id = !!sym(old_id)) |>
+    select(author_llm_or_human, opponent_llm_or_human, .lines, .id) |>
+    separate_longer_delim(.lines, delim=",") |>
+    mutate(.lines = mapping(.lines)) |>
+    unique() |>
+    mutate(linecount = 1) |>
+    pivot_wider(
+      names_from = .lines, 
+      values_from = linecount, 
+      names_prefix = "lineno_",
+      values_fill = 0
+      ) |>
+    summarise(across(starts_with("lineno_"), mean), .by = c(
+      "author_llm_or_human",
+      "opponent_llm_or_human"
+    )) |>
+    pivot_longer(
+      cols = starts_with("lineno_"),
+      names_to = "line_number",
+      names_prefix = "lineno_",
+      values_to = "line_mean",
+      names_transform = factor
+    ) |>
+    mutate(
+      author_llm_or_human = paste(author_llm_or_human, if (type == "t") "Defender" else "Attacker"),
+      opponent_llm_or_human = paste(opponent_llm_or_human, if (type == "m") "Defender" else "Attacker")
+      ) |>
+    ggplot(aes(y = line_number, x = line_mean)) +
+    geom_col() +
+    facet_grid(opponent_llm_or_human ~ author_llm_or_human) +
+    scale_x_continuous(labels = percent)
+}
 ```
 
 
+There are no remarkable differences between human and LLM defenders when it comes
+to coverage. Generally speaking, methods are covered more often by the LLM
+defenders, and `CharRange.toString()` is covered much more often than by Human
+defenders.
+
+```{r}
+deftests |>
+  filter(cut == "CharRange") |>
+  method_coverage_plot("t") +
+  labs(title = "Tests for CharRange", x = "Tests that cover this method", y = "Method name")
+```
+
+For `ByteVector`, the only difference that jumps to the eye is that LLM 
+defenders are much more likely to use the parameterized constructor instead
+of the default constructor. A possible explanation for that is that the
+convenience of a shorter name does not matter for the LLM, but does so for the
+humans.
+
+```{r}
+deftests |>
+  filter(cut == "ByteVector") |>
+  method_coverage_plot("t") +
+  labs(title = "Tests for ByteVectore", x = "Tests that cover this method", y = "Method name")
+```
+Behavior between human and LLM attackers, however, differs much more extremely.
+For `CharRange`, both human and LLM attackers mutated the method 
+`contains(CharRange)`, which is the most complex method of the class, in a
+plurality of their submissions. LLM attackers concentrated on this method far
+more, however, to the point that almost 60% of all LLM-generated mutants in
+games against humans target this method.
+
+```{r}
+mutants |>
+  filter(cut == "CharRange") |>
+  method_coverage_plot("m") +
+  labs(title = "Mutations for CharRange", x = "Mutants that change this method", y = "Method name")
+```
+
+For `ByteVector`, this effect is even more extreme, reaching almost 80% for the
+most complex method `putUTF8()`. As in `CharRange`, the effect is stronger
+when matched against a human.
+
+```{r}
+mutants |>
+  filter(cut == "ByteVector") |>
+  method_coverage_plot("m") +
+  labs(title = "Mutations for ByteVector", x = "Mutants that change this method", y = "Method name")
+```
+
+Both classes have one method that is clearly much more complex than the other
+methods, it would be interesting to know how the LLM would act in classes where
+the complexity is more evenly distributed.
 
 
 # Game statistics
@@ -1192,41 +1366,120 @@ While no such data exists for human submissions, we can extract the replies to
 the LLM for rejected submissions. There are some caveats to consider:
 
 The validation system in the CodeDefenders build used during the study is
-imprecise and often buggy. 
+imprecise and often buggy. This has since been fixed, but many of the categories
+are overly broad and unspecific. I assume that this has also influenced LLM
+behaviour. For example, adding a loop to a test is illegal in CodeDefenders.
+The message that is sent back to the LLM only specifies that this loop is an
+"Invalid statement", without any explanation as to why. In some cases, the
+rejection reason remains empty.
+
+These messages also do not cover the last, unsuccessful attempt of an LLM
+to generate a submission, since there will not be an answer to the last attempt,
+instead, a new conversation is started.
+
+Also, only one error message is returned to the LLM, so if a submission fails
+for one reason, we cannot know if it would have failed for other reasons.
+
+Still, we have can garner some insights. 
+
+### Test rejections
+
+Test submissions are primarily rejected because of "Invalid statements".
+These statements, like loops, ternary operators, if-statements and logical
+comparisons would not actually be invalid in a real-world test suite,
+but are forbidden in CodeDefenders. This error type could 
+potentially be improved in future iterations by a more detailed system prompt.
+
+Only 51% of all messages with this error belong to a conversation that
+eventually succeeds. Better error messages that explain what kind of expression
+is not allowed could also help.
+
+The same is true for "prohibited calls", which refers to calls to `System.*`,
+Random number generators, IO, etc., with an eventual success rate of only 44%.
+
+For compilation errors and tests that fail on the original, the eventual success
+rates are high in comparison, with 72.2% and 79.5% eventual success rates,
+respectively.
+
+There are significant differences between the classes for which these tests
+were generated. LLMs were far more likely to generate invalid statements for
+`CharRange` compared to `ByteVector`, while the number of compile errors is
+smaller. It is, as noted above, possible however that some of those tests rejected for invalid
+statements would have been uncompilable anyway. Eventual success rates are 
+usually higher for `CharRange`. 
+
+The other failure reasons have a much lower incidence.
+
+
 
 ```{r}
 all_messages |>
-  filter(user_id == 6) |>
-  summarise(n = n(), .by = c(rejection_reason, is_success)) |>
-  filter(!is.na(rejection_reason)) |>
-  mutate(is_success = ifelse(is_success, "Eventually successful", "Not eventually successful")) |>
+  filter(startsWith(as.character(rejection_reason), "Test")) |>
+  summarise(n = n(), .by = c(rejection_reason, cut)) |>
   ggplot(aes(fill = rejection_reason, y = n, x = "")) +
   geom_col(position = "dodge") +
   labs(title = "Rejection reasons for defender tests",
+       x = NULL,
+       y = "Number of failed attemps",
+       fill = "Rejection reason") +
+  geom_text(aes(label = after_stat(y)), position = position_dodge(0.9), vjust = -0.2) +
+  facet_wrap(~ cut)
+```
+
+```{r}
+all_messages |>
+  filter(startsWith(as.character(rejection_reason), "Test")) |>
+  summarise(is_success = mean(is_success), .by = c(rejection_reason, cut)) |>
+  ggplot(aes(x = "", y = is_success, fill = rejection_reason)) +
+  scale_percentage_bars() +
+  labs(title = "Eventual success rates for rejected tests", 
+       y = "Eventual success percentage",
+       fill = "Rejection reason",
+       x = NULL) +
+  facet_wrap( ~ cut)
+  
+```
+
+### Mutants
+
+The vast majority of rejected mutants are rejected because an identical mutant
+already exists. 79% of them could eventually be submitted.
+
+It might be worth considering if it could be worthwhile to supply the LLM with a
+sample of the most often repeated mutants and tell it specifically to do 
+something different.
+
+From the other reasons, only "Mutant has prohibited operations" is present in
+significant numbers. More detailed error messages could provide more interesting
+data, but the eventual success rate is still much higher than for most test
+failures, at 93%.
+
+
+
+```{r}
+all_messages |>
+  filter(startsWith(as.character(rejection_reason), "Mutant")) |>
+  summarise(n = n(), .by = c(rejection_reason, cut)) |>
+  ggplot(aes(fill = rejection_reason, y = n, x = "")) +
+  geom_col(position = "dodge") +
+  labs(title = "Rejection reasons for attacker tests",
        x = NULL,#"Conversation is eventually successful",
        y = "Number of failed attemps",
        fill = "Rejection reason") +
   geom_text(aes(label = after_stat(y)), position = position_dodge(0.9), vjust = -0.2) +
-  facet_wrap( ~ is_success)
+  facet_wrap( ~ cut)
 ```
-
-
 ```{r}
 all_messages |>
-  filter(user_id == 5) |>
-  summarise(n = n(), .by = c(rejection_reason, is_success)) |>
-  filter(!is.na(rejection_reason)) |>
-  #pivot_longer(cols = starts_with("rejection_"), 
-  #             names_to = "rejection_type", 
-  #             values_to = "rejection_count",
-  #             values_drop_na = TRUE) |>
-  #filter(rejection_type != "rejection_NA") |>
-  ggplot(aes(fill = rejection_reason, y = n, x = is_success)) +
-  geom_col(position = "fill") +
-  labs(title = "Rejection reasons for attacker tests",
-       x = "Conversation is eventually successful",
-       y = "Percentage of failed attempts",
-       fill = "Rejection reason")
+  filter(startsWith(as.character(rejection_reason), "Mutant")) |>
+  summarise(is_success = mean(is_success), .by = c(rejection_reason, cut)) |>
+  ggplot(aes(x = "", y = is_success, fill = rejection_reason)) +
+  scale_percentage_bars(vjust = 1.5) +
+  labs(title = "Eventual success rates for rejected mutants", 
+       y = "Eventual success percentage",
+       fill = "Rejection reason",
+       x = NULL) +
+  facet_grid(cut ~ .)
 ```
 
 
