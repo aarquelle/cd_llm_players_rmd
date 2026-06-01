@@ -11,6 +11,7 @@ editor_options:
 ```{r knitr-setup, include=FALSE}
 knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 knitr::opts_chunk$set(echo = F)
+knitr::opts_chunk$set(fig.width=7, fig.height=4) 
 ```
 
 ```{r data-setup, include=FALSE}
@@ -184,6 +185,7 @@ questionnaire |>
   labs(x = NULL, y = "Count", fill = "Semester",
        title = "Semester of participants")
 ```
+
 ## Skill levels as predictors of submission quality
 
 It might be useful in further analysis to divide users into highly-skilled,
@@ -292,6 +294,7 @@ deftests |>
   
   
 ```
+
 # Influence of experiment round
 
 Note: Such diagrams are probably not necessary, now that we have the regression
@@ -475,6 +478,7 @@ deftests |>
   scale_fill_manual(name = "Attacker", values = colors.actor) +
   facet_wrap( ~ cut)
 ```
+
 ## Points of individual mutants
 
 Same as with tests, mutant points are usually very low, with some outliers.
@@ -696,6 +700,7 @@ mutants |>
     ylab("Proportion") + 
     ggtitle("Attacker Turing test")
 ```
+
 # Stillborn mutants
 
 A stillborn mutant is a mutant that was killed by a test that was already in the game.
@@ -809,6 +814,7 @@ mutants |>
     ggtitle("Equivalent mutants") + 
     xlab(NULL)
 ```
+
 # Survival rates
 The following plots show the percentage of mutants within the specified 
 population that survive until the end of their game.
@@ -871,6 +877,7 @@ mutants |>
   ) +
   facet_wrap( ~ cut)
 ```
+
 ## Which lines were covered and mutated?
 
 The following plots show which lines were covered and mutated by tests and
@@ -948,6 +955,7 @@ mutants |>
   coverage_plot("m") +
   labs(title = "Mutations for ByteVector", y = "Mutants that change this line", x = "Line number")
 ```
+
 ## Which methods were covered and mutated?
 
 The plots above are difficult to parse, so we will map the line numbers to methods.
@@ -1274,6 +1282,7 @@ mutants |>
   
 
 ```
+
 #### Output tokens
 
 ```{r}
@@ -1288,6 +1297,7 @@ mutants |>
   ggtitle("Output tokens for mutant generation")
 
 ```
+
 ## Generating tests
 
 This only covers tests
