@@ -465,6 +465,10 @@ killmap_data <- function(tests, mutants) {
   )
 }
 
+mutant_score_data <- function(study) {
+  
+}
+
 load_messages <- function(study) {
   if (!study %in% c("llmvsllm", "userstudy")) {
     stop(paste("study must be llmvsllm or userstudy, was ", study))
@@ -697,3 +701,9 @@ all_conversations <- all_messages |>
     across(starts_with("rejection_"), sum),
     .by = c(conversation_id, game_id, strategy, type, user_id, mutant_id, test_id, is_success)
   )
+
+n_loc <- tests |>
+  select(cut, lines_covered) |>
+  separate_longer_delim(lines_covered, ",") |>
+  unique() |>
+  summarise(loc_for_cut = n(), .by = cut)

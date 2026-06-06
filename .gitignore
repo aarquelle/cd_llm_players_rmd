@@ -50,4 +50,8 @@ rsconnect/
 
 # Compiled notebook files
 *.nb.html
+*.pd
 *.pdf
+BA.qmd
+.quarto/
+_extensions/quarto-ext/

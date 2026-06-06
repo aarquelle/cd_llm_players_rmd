@@ -678,10 +678,8 @@ deftests |>
   summarise(n = n()) |>
   ggplot(aes(x = author_llm_or_human, y = n, fill = opponent_opinion_human_or_ai)) + 
     geom_col(position = "fill", name = "Proportion") +
-    scale_fill_manual(name = "Attacker's guess", values = colors.opinion) +
-    xlab("Defender") +
-    ylab("Proportion") +
-    ggtitle("Defender Turing test") + 
+    scale_fill_ordinal() +
+    labs(x = "Defender", y = "Proportion", fill = "Attacker's guess", title = "Defender Turing test") +
     scale_y_continuous(labels = percent)
 
 ```
@@ -694,11 +692,9 @@ mutants |>
   summarise(n = n()) |>
   ggplot(aes(x = author_llm_or_human, y = n, fill = opponent_opinion_human_or_ai)) + 
     geom_col(position = "fill", name = "Proportion") +
-    scale_fill_manual(name = "Defender's guess", values = colors.opinion) +
+    scale_fill_ordinal() +
     scale_y_continuous(labels = percent) +
-    xlab("Attacker") +
-    ylab("Proportion") + 
-    ggtitle("Attacker Turing test")
+    labs(fill = "Defender's guess", x = "Attacker", y = "Proportion", title = "Attacker Turing test")
 ```
 
 # Stillborn mutants
@@ -1102,6 +1098,27 @@ mutants |>
 Both classes have one method that is clearly much more complex than the other
 methods, it would be interesting to know how the LLM would act in classes where
 the complexity is more evenly distributed.
+
+## Test suite coverage
+
+These plots show the complete line coverage percentage of a game's tests.
+It is assumed that only lines that are covered by any test in the study are 
+valid lines of code.
+
+```{r}
+deftests |>
+  separate_longer_delim(lines_covered, ",") |>
+  summarise(.by = c(lines_covered, game_id, cut, author_llm_or_human, opponent_llm_or_human)) |>
+  left_join(n_loc, join_by(cut)) |>
+  summarise(lines_covered = n(), .by = c(game_id, cut, author_llm_or_human, opponent_llm_or_human, loc_for_cut)) |>
+  mutate(line_coverage = lines_covered / loc_for_cut) |>
+  ggplot(aes(y = line_coverage, x = author_llm_or_human, fill = opponent_llm_or_human)) +
+  scale_default_grouping("t") + 
+  geom_boxplot() +
+  labs(title = "Line coverage", y = "Line coverage") +
+  scale_y_continuous(labels = percent)
+```
+
 
 
 # Game statistics
