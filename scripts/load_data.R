@@ -1,3 +1,5 @@
+rm(list = ls())
+
 library(dplyr)
 library(stringr)
 library(tidyr)
@@ -15,10 +17,22 @@ experience_labels <- c("< 3 months",
                        ">= 1 year && < 3 years",
                        ">= 3 years")
 
-tee <- function(.data, f) {
-  f()
-  .data
+
+readdbtable <- function(filename, study) {
+  read.csv(paste("rawdata", study, "db_tables", filename, sep = "/"), skipNul = TRUE) |>
+    rename_with(tolower)
 }
+
+#Creates a list with the values for userstudy and llmvsllm from the supplied load function
+tl <- function(f) {
+  u <- f("userstudy") |>
+    mutate(study = "userstudy")
+  l <- f("llmvsllm") |>
+    mutate(study = "llmvsllm")
+  bind_rows(u, l) |> mutate(study = factor(study))
+}
+
+
 
 rename_to_opponent <- function(df) {
   rename_with(df, function(c) {
@@ -37,162 +51,39 @@ normalise_value <- function(l) {
   tmp <- (l - min(l, na.rm = TRUE)) / (max(l, na.rm = TRUE) - min(l, na.rm = TRUE))
 }
 
-load_tests <- function(study) {
-  if (!study %in% c("llmvsllm", "userstudy")) {
-    stop(paste("study must be llmvsllm or userstudy, was ", study))
-  }
-  
-  readdbtable <- function(filename) {
-    read.csv(paste("rawdata", study, "db_tables", filename, sep = "/"), skipNul = TRUE) |>
-      rename_with(tolower)
-  }
-  
-  classes <- readdbtable("classes.csv") |>
+classes <- tl(function(study) {
+  readdbtable("classes.csv", study) |>
     select(class_id, name, javafile) |>
     mutate(name = factor(name))
-  
-  experiment <- readdbtable("experiment.csv") |>
+})
+
+experiment <- tl(function(study) {
+  readdbtable("experiment.csv", study) |>
     filter(experiment_name == "study") |>
-    select(int_value)
-  
-  games <- readdbtable("games.csv") |>
-    select(id, timestamp) |>
-    mutate(
-      round = case_when(
-        study == "llmvsllm" ~ "LLM vs LLM",
-        timestamp == "2026-02-03 08:34:27" ~ "Round 1",
-        timestamp == "2026-02-03 08:34:28" ~ "Round 1",
-        timestamp == "2026-02-03 12:26:18" ~ "Round 1",
-        timestamp == "2026-02-03 09:08:43" ~ "Round 2",
-        timestamp == "2026-02-03 13:02:51" ~ "Round 2",
-        TRUE ~ NA
-      ) |> factor()
-    ) |>
-    filter(!is.na(round)) |>
-    filter(study == "llmvsllm" | id != 345) |>
-    filter(study == "userstudy" | id %in% experiment$int_value) |>
-    rename(game_start = timestamp)
-  
-  users <- readdbtable("users.csv") |>
+    select(int_value) |>
+    mutate(is_valid_experiment = TRUE)
+})
+
+users <- tl(function(study) {
+  readdbtable("users.csv", study) |>
     select(user_id, username) |>
     filter(user_id >= 5) |>
     mutate(
       llm_or_human = factor(ifelse(user_id <= 6, "LLM", "Human"), levels = c("LLM", "Human"))
     )
-  
-  players <- readdbtable("players.csv") |>
+})
+
+players <- tl(function(study) {
+  readdbtable("players.csv", study) |>
     select(id, user_id, game_id, role) |>
-    filter(role %in% c("ATTACKER", "DEFENDER")) |>
-    inner_join(users, join_by(user_id)) |>
-    rename(player_id = id) |>
-    mutate(role = factor(role))
-  
-  test_smell <- readdbtable("test_smell.csv") |>
-    mutate(value = TRUE) |>
-    mutate(
-      smell_name = smell_name |> 
-        tolower() %>%
-        gsub(" ", "_", .) %>%
-        paste("smell", ., sep = "_") |>
-        factor()) |>
-    pivot_wider(names_from = smell_name, values_from = value, values_fill = FALSE)
+    filter(role %in% c("ATTACKER", "DEFENDER"))
+}) |>
+  inner_join(users, join_by(user_id, study)) |>
+  rename(player_id = id) |>
+  mutate(role = factor(role))
 
-  
-  messages <- readdbtable("llm_messages.csv") |>
-    select(message_type, conversation_id) |>
-    filter(message_type == "AI")
-  
-  conversations <- readdbtable("llm_conversations.csv") |>
-    inner_join(messages, join_by(conversation_id)) |>
-    summarise(number_of_messages = n(), .by = test_id)
-  
-  invalid_tests <- read.csv("rawdata/killmaps/invalid_tests.csv") |>
-    mutate(fails_against_cut = TRUE) |>
-    rename(test_id = ID)
-  
-  messages <- readdbtable("llm_messages.csv") |>
-    select(message_type, conversation_id, input_tokens, output_tokens) |>
-    filter(message_type == "AI")
-  
-  conversations <- readdbtable("llm_conversations.csv") |>
-    filter(user_id == 6) |>
-    inner_join(messages, join_by(conversation_id)) |>
-    summarise(
-      number_of_messages = n(),
-      input_tokens = sum(input_tokens),
-      output_tokens = sum(output_tokens),
-      .by = c(test_id, game_id)
-    ) |>
-    filter(game_id %in% games$id)
-  
-  tests <- readdbtable("tests.csv") |>
-    select(test_id, game_id, class_id, classfile, javafile, player_id, timestamp, lines_covered, points) |>
-    mutate(
-      classfile = classfile != "",
-      number_lines_covered = str_count(lines_covered, ",") + 1
-    ) |>
-    rename(
-      is_compiled = classfile,
-      test_file = javafile,
-      author_player_id = player_id
-    ) |>
-    left_join(classes, join_by(class_id)) |>
-    select(!c(javafile, class_id)) |>
-    rename(cut = name) |>
-    inner_join(games, join_by(game_id == id)) |>
-    #select(!class_id) |>
-    mutate(
-      seconds_since_gamestart = (as.POSIXct(timestamp) - as.POSIXct(game_start)) |>
-        as.numeric(units = "secs")
-    ) |>
-    select(!c(timestamp, game_start)) |>
-    inner_join(rename_to_author(players), join_by(author_player_id, game_id == author_game_id)) |>
-    inner_join(rename_to_opponent(players), join_by(game_id == opponent_game_id), relationship = "many-to-many") |>
-    left_join(conversations, join_by(test_id, game_id)) |>
-    filter(author_player_id != opponent_player_id) |>
-    left_join(test_smell, join_by(test_id)) |>
-    mutate(
-      across(starts_with("smell"), function(x){
-        ifelse(is.na(x), FALSE, x)
-      })
-    ) |>
-    mutate(
-      is_equivalence_test = author_role != "DEFENDER"
-    ) |>
-    
-    
-    mutate(
-      test_id = paste(substr(study, start = 1, stop = 1), test_id, sep = "")
-    ) |>
-    left_join(invalid_tests, join_by(test_id)) |>
-    mutate(fails_against_cut = !is.na(fails_against_cut))
-  
-  if (study == "userstudy") {
-    tests
-  } else {
-    tests |> right_join(experiment, join_by(game_id == int_value), keep = FALSE)
-  }
-}
-
-load_mutants <- function(study) {
-  if (!study %in% c("llmvsllm", "userstudy")) {
-    stop(paste("study must be llmvsllm or userstudy, was ", study))
-  }
-  
-  readdbtable <- function(filename) {
-    read.csv(paste("rawdata", study, "db_tables", filename, sep = "/"), skipNul = TRUE) |>
-      rename_with(tolower)
-  }
-  
-  experiment <- readdbtable("experiment.csv") |>
-    filter(experiment_name == "study") |>
-    select(int_value)
-  
-  classes <- readdbtable("classes.csv") |>
-    select(class_id, name, javafile) |>
-    mutate(name = factor(name))
-  
-  games <- readdbtable("games.csv") |>
+games <- tl(function(study) {
+  readdbtable("games.csv", study) |>
     select(id, timestamp) |>
     mutate(
       round = case_when(
@@ -209,282 +100,325 @@ load_mutants <- function(study) {
     filter(study == "llmvsllm" | id != 345) |>
     filter(study == "userstudy" | id %in% experiment$int_value) |>
     rename(game_start = timestamp)
-  
-  users <- readdbtable("users.csv") |>
-    select(user_id, username) |>
-    filter(user_id >= 5) |>
-    mutate(llm_or_human = factor(ifelse(user_id <= 6, "LLM", "Human"), levels = c("LLM", "Human")))
-  
-  players <- readdbtable("players.csv") |>
-    select(id, user_id, game_id, role) |>
-    filter(role %in% c("ATTACKER", "DEFENDER")) |>
-    inner_join(users, join_by(user_id)) |>
-    mutate(role = factor(role)) |>
-    rename(player_id = id)
-  
-  equivalences <- readdbtable("equivalences.csv") |>
-    select(mutant_id, mutant_points) |>
-    rename(points_until_equivalent = mutant_points)
-  
-  messages <- readdbtable("llm_messages.csv") |>
+})
+
+test_smell <- tl(function(study) {
+  readdbtable("test_smell.csv", study) |>
+  mutate(value = TRUE) |>
+  mutate(
+    smell_name = smell_name |> 
+      tolower() %>%
+      gsub(" ", "_", .) %>%
+      paste("smell", ., sep = "_") |>
+      factor()) |>
+  pivot_wider(names_from = smell_name, values_from = value, values_fill = FALSE)
+})
+
+messages <- tl(function(study) {
+  readdbtable("llm_messages.csv", study) |>
     select(message_type, conversation_id, input_tokens, output_tokens) |>
     filter(message_type == "AI")
+})
+
+conversations <- tl(function(study) {
+  readdbtable("llm_conversations.csv", study)
+}) |>
+  inner_join(messages, join_by(conversation_id, study)) |>
+  filter(game_id %in% games$id) |>
+  summarise(
+    number_of_messages = n(),
+    input_tokens = sum(input_tokens),
+    output_tokens = sum(output_tokens),
+    .by = c(test_id, mutant_id, game_id, study)
+  )
   
-  conversations <- readdbtable("llm_conversations.csv") |>
-    filter(user_id == 5) |>
-    inner_join(messages, join_by(conversation_id)) |>
-    summarise(
-      number_of_messages = n(),
-      input_tokens = sum(input_tokens),
-      output_tokens = sum(output_tokens),
-      .by = c(mutant_id, game_id)
-      ) |>
-    filter(game_id %in% games$id)
+
+invalid_tests <- read.csv("rawdata/killmaps/invalid_tests.csv") |>
+  mutate(fails_against_cut = TRUE) |>
+  mutate(
+    study = factor(ifelse(grepl("u.*", ID), "userstudy", "llmvsllm")),
+    ID = as.integer(substring(ID, first = 2))
+  ) |>
+  rename(test_id = ID)
+
+equivalences <- tl(function(study) {
+  readdbtable("equivalences.csv", study) |>
+    select(mutant_id, mutant_points) |>
+    rename(points_until_equivalent = mutant_points)
+})
+
+tests <- tl(function(study) {
+  readdbtable("tests.csv", study) |>
+  select(test_id, game_id, class_id, classfile, javafile, player_id, timestamp, lines_covered, points) |>
+  mutate(
+    classfile = classfile != "",
+    number_lines_covered = str_count(lines_covered, ",") + 1
+  ) |>
+  rename(
+    is_compiled = classfile,
+    test_file = javafile,
+    author_player_id = player_id
+  )}) |>
+  left_join(classes, join_by(class_id, study)) |>
+  select(!c(javafile, class_id)) |>
+  rename(cut = name) |>
+  inner_join(games, join_by(game_id == id, study)) |>
+  mutate(
+    seconds_since_gamestart = (as.POSIXct(timestamp) - as.POSIXct(game_start)) |>
+      as.numeric(units = "secs")
+  ) |>
+  select(!c(timestamp, game_start)) |>
+  inner_join(rename_to_author(players), join_by(author_player_id, game_id == author_game_id, study == author_study)) |>
+  inner_join(rename_to_opponent(players), join_by(game_id == opponent_game_id, study == opponent_study), relationship = "many-to-many") |>
+  left_join(conversations, join_by(test_id, game_id, study)) |>
+  filter(author_player_id != opponent_player_id) |>
+  left_join(test_smell, join_by(test_id, study)) |>
+  mutate(
+    across(starts_with("smell"), function(x){
+      ifelse(is.na(x), FALSE, x)
+    })
+  ) |>
+  mutate(
+    is_equivalence_test = author_role != "DEFENDER"
+  ) |>
   
-  
-  
-  mutants <- readdbtable("mutants.csv") |>
+  left_join(invalid_tests, join_by(test_id, study)) |>
+  mutate(fails_against_cut = !is.na(fails_against_cut)) |>
+  left_join(experiment, join_by(game_id == int_value, study)) |> 
+  filter(study == "userstudy" | is_valid_experiment)
+
+mutants <- tl(function(study) {
+  readdbtable("mutants.csv", study) |>
     select(mutant_id, javafile, classfile, alive, game_id, class_id, equivalent, player_id, timestamp, points, mutatedlines, killmessage) |>
     rename(
       mutant_file = javafile,
       author_player_id = player_id
-      ) |>
-    inner_join(games, join_by(game_id == id)) |>
-    inner_join(rename_to_author(players), join_by(author_player_id, game_id == author_game_id)) |>
-    inner_join(rename_to_opponent(players), join_by(game_id == opponent_game_id), relationship = "many-to-many") |>
-    left_join(conversations, join_by(mutant_id, game_id)) |>
-    filter(author_player_id != opponent_player_id) |>
-    inner_join(classes, join_by(class_id)) |>
-    left_join(equivalences, join_by(mutant_id)) |>
-    select(!javafile) |>
-    mutate(
-      seconds_since_gamestart = (as.POSIXct(timestamp) - as.POSIXct(game_start)) |>
-        as.numeric(units = "secs"),
-      is_stillborn = points == 0,
-      alive = as.logical(alive),
-      equivalent = equivalent %in% c("DECLARED_YES", "ASSUMED_YES"), 
-      classfile = classfile != "",
-      number_mutated_lines = str_count(mutatedlines, ",") + 1,
-    ) |>
-    rename(
-      cut = name,
-      survived = alive,
-      declared_equivalent = equivalent,
-      is_compiled = classfile
-    ) |>
-    
-    
-    mutate(
-      mutant_id = paste(substr(study, start = 1, stop = 1), mutant_id, sep = "")
-    )
+    )}) |>
+  inner_join(games, join_by(game_id == id, study)) |>
+  inner_join(rename_to_author(players), join_by(author_player_id, game_id == author_game_id, study == author_study)) |>
+  inner_join(rename_to_opponent(players), join_by(game_id == opponent_game_id, study == opponent_study), relationship = "many-to-many") |>
+  left_join(conversations, join_by(mutant_id, game_id, study)) |>
+  filter(author_player_id != opponent_player_id) |>
+  inner_join(classes, join_by(class_id, study)) |>
+  left_join(equivalences, join_by(mutant_id, study)) |>
+  select(!javafile) |>
+  mutate(
+    seconds_since_gamestart = (as.POSIXct(timestamp) - as.POSIXct(game_start)) |>
+      as.numeric(units = "secs"),
+    is_stillborn = points == 0,
+    alive = as.logical(alive),
+    equivalent = equivalent %in% c("DECLARED_YES", "ASSUMED_YES"), 
+    classfile = classfile != "",
+    number_mutated_lines = str_count(mutatedlines, ",") + 1,
+  ) |>
+  rename(
+    cut = name,
+    survived = alive,
+    declared_equivalent = equivalent,
+    is_compiled = classfile
+  ) |>
+  left_join(experiment, join_by(game_id == int_value, study)) |> 
+  filter(study == "userstudy" | is_valid_experiment)
   
-  if (study == "userstudy") {
-    mutants
-  } else {
-    mutants |> right_join(experiment, join_by(game_id == int_value), keep = FALSE)
-  }
-    
-}
+killmap_tests <- tests |>
+  filter(!fails_against_cut, is_compiled) |>
+  select(test_id, seconds_since_gamestart, game_id, author_llm_or_human, study) |>
+  rename(test_seconds = seconds_since_gamestart, test_game_id = game_id, test_actor = author_llm_or_human)
 
-killmap_data <- function(tests, mutants) {
-  killmap_tests <- tests |>
-    filter(!fails_against_cut) |>
-    select(test_id, seconds_since_gamestart, game_id, author_llm_or_human) |>
-    rename(test_seconds = seconds_since_gamestart, test_game_id = game_id, test_actor = author_llm_or_human)
-  
-  killmap_mutants <- mutants |>
-    select(mutant_id, seconds_since_gamestart, game_id, author_llm_or_human) |>
-    rename(mutant_seconds = seconds_since_gamestart, mutant_game_id = game_id, mutant_actor = author_llm_or_human)
-  
-  canonical_killmaps <- read.csv("rawdata/killmaps/killmaps.csv", header = FALSE, col.names = c("test_id", "mutant_id", "state")) |>
-    mutate(state = factor(state))
-  test_mapping <- read.csv("rawdata/killmaps/dedup_test_mapping.csv", header = FALSE, col.names = c("dup_test_id", "canonical_id"))
-  mutant_mapping <- read.csv("rawdata/killmaps/dedup_mutant_mapping.csv", header = FALSE, col.names = c("dup_mutant_id", "canonical_id"))
-  
-  full_map <- test_mapping |>
-    left_join(canonical_killmaps, join_by(canonical_id == test_id), relationship = "many-to-many") |>
-    right_join(mutant_mapping, join_by(mutant_id == canonical_id), relationship = "many-to-many") |>
-    select(dup_test_id, state, dup_mutant_id) |>
-    rename(test_id = dup_test_id, mutant_id = dup_mutant_id) |>
-    right_join(killmap_tests, join_by(test_id)) |>
-    right_join(killmap_mutants, join_by(mutant_id))
-  
-  global_test_map <- full_map |>
-    summarise(
-      n = n(),
-      .by = c(test_id, mutant_actor, state)
-    ) |>
-    pivot_wider(
-      names_from = c(mutant_actor, state),
-      values_from = n,
-      values_fill = 0
-    ) |>
-    rename(
-      human_mutants_killed = Human_KILLED,
-      llm_mutants_killed = LLM_KILLED,
-      human_mutants_ignored = Human_SURVIVED,
-      llm_mutants_ignored = LLM_SURVIVED
+killmap_mutants <- mutants |>
+  filter(is_compiled) |>
+  select(mutant_id, seconds_since_gamestart, game_id, author_llm_or_human, study) |>
+  rename(mutant_seconds = seconds_since_gamestart, mutant_game_id = game_id, mutant_actor = author_llm_or_human)
+
+canonical_killmaps <- read.csv("rawdata/killmaps/killmaps.csv", header = FALSE, col.names = c("test_id", "mutant_id", "state")) |>
+  mutate(
+    state = factor(state),
+    test_study = ifelse(grepl("u.*", test_id), "userstudy", "llmvsllm"),
+    test_id = as.integer(substring(test_id, first = 2)),
+    mutant_study = ifelse(grepl("u.*", mutant_id), "userstudy", "llmvsllm"),
+    mutant_id = as.integer(substring(mutant_id, first = 2))
     )
-  
-  global_mutant_map <- full_map |>
-    summarise(
-      n = n(),
-      .by = c(mutant_id, test_actor, state)
-    ) |>
-    pivot_wider(
-      names_from = c(test_actor, state),
-      values_from = n,
-      values_fill = 0
-    ) |>
-    rename(
-      human_tests_killed_by = Human_KILLED,
-      llm_tests_killed_by = LLM_KILLED,
-      human_tests_survived = Human_SURVIVED,
-      llm_tests_survived = LLM_SURVIVED
-    )
-    
-    
-  game_map <- full_map |>
-    filter(test_game_id == mutant_game_id) |>
-    rename(game_id = test_game_id) |>
-    select(!mutant_game_id)
-  
-  # Counts how many mutants were killed within the same game,
-  # grouped by whether the mutant already existed at test creation
-  time_test_map <- game_map |>
-    mutate(mutant_is_future = mutant_seconds >= test_seconds) |>
-    summarise(
-      n = n(),
-      .by = c(test_id, mutant_is_future, state)
-      ) |>
-    pivot_wider(
-      names_from = c(mutant_is_future, state),
-      values_from = n,
-      values_fill = 0
-    ) |>
-    rename(
-      existing_mutants_killed = FALSE_KILLED,
-      future_mutants_ignored = TRUE_SURVIVED,
-      future_mutants_killed = TRUE_KILLED,
-      existing_mutants_ignored = FALSE_SURVIVED
-    )
-  
-  time_mutant_map <- game_map |>
-    mutate(mutant_is_future = mutant_seconds >= test_seconds) |>
-    summarise(
-      n = n(),
-      .by = c(mutant_id, mutant_is_future, state)
-    ) |>
-    pivot_wider(
-      names_from = c(mutant_is_future, state),
-      values_from = n,
-      values_fill = 0
-    ) |>
-    rename(
-      future_tests_killed_by = FALSE_KILLED,
-      existing_tests_survived = TRUE_SURVIVED,
-      existing_tests_killed_by = TRUE_KILLED,
-      future_tests_survived = FALSE_SURVIVED
-    )
-    
-  
-  
-  fresh_kill_map <- game_map |>
-    filter(mutant_seconds < test_seconds) |>
-    filter(state == "KILLED") |>
-    group_by(mutant_id) |>
-    summarise(test_id = min(test_id)) |>
-    group_by(test_id) |>
-    summarise(fresh_killed_mutants = n())
-  
-  list(tests = tests |>
-    left_join(fresh_kill_map, join_by(test_id)) |>
-    left_join(global_test_map, join_by(test_id)) |>
-    left_join(time_test_map, join_by(test_id)) |>
-    #mutate(
-    #  #fresh_killed_mutants = ifelse(is.na(fresh_killed_mutants), 0, fresh_killed_mutants)
-    #  
-    #  )
-    replace_na(
-      list(
-        fresh_killed_mutants = 0,
-        existing_mutants_killed = 0,
-        future_mutants_killed = 0,
-        existing_mutants_ignored = 0,
-        future_mutants_ignored = 0,
-        human_mutants_killed = 0,
-        llm_mutants_killed = 0,
-        human_mutants_ignored = 0,
-        llm_mutants_ignored = 0
-      )
-    ) |> mutate(
-      kill_rate = (human_mutants_killed + llm_mutants_killed) 
-      / (human_mutants_killed + human_mutants_ignored + llm_mutants_killed + llm_mutants_ignored) |>
-        replace_na(0),
-      human_kill_rate = (human_mutants_killed / (human_mutants_killed + human_mutants_ignored)) |>
-        replace_na(0),
-      llm_kill_rate = (llm_mutants_killed / (llm_mutants_killed + llm_mutants_ignored)) |>
-        replace_na(0),
-      existing_kill_rate = (existing_mutants_killed / (existing_mutants_killed + existing_mutants_ignored)) |>
-        replace_na(0),
-      future_kill_rate = (future_mutants_killed / (future_mutants_killed + future_mutants_ignored)) |>
-        replace_na(0)
-    )
-    
-    
-    
-    ,
-    mutants = mutants |>
-      left_join(global_mutant_map, join_by(mutant_id)) |>
-      left_join(time_mutant_map, join_by(mutant_id)) |>
-      replace_na(
-        existing_tests_killed_by = 0,
-        future_tests_killed_by = 0,
-        existing_tests_surived = 0,
-        future_tests_surived = 0,
-        human_tests_killed_by = 0,
-        llm_tests_killed_by = 0,
-        human_tests_surived = 0,
-        llm_tests_surived = 0
-      ) |>
-      mutate(
-        has_been_killed = human_tests_killed_by + llm_tests_killed_by > 0,
-        evasion_rate = ((human_tests_survived + llm_tests_survived) 
-        / (human_tests_survived + human_tests_killed_by + llm_tests_survived + llm_tests_killed_by)) |>
-          replace_na(0),
-        human_evasion_rate = (human_tests_survived / (human_tests_survived + human_tests_killed_by)) |>
-          replace_na(0),
-        llm_evasion_rate = (llm_tests_survived / (llm_tests_survived + llm_tests_killed_by)) |>
-          replace_na(0),
-        existing_evasion_rate = (existing_tests_survived / (existing_tests_survived + existing_tests_killed_by)) |>
-          replace_na(0),
-        future_evasion_rate = (future_tests_survived / (future_tests_survived + future_tests_killed_by)) |>
-          replace_na(0),
-      )
-    
+test_mapping <- read.csv("rawdata/killmaps/dedup_test_mapping.csv", header = FALSE, col.names = c("dup_test_id", "canonical_id")) |>
+  mutate(
+    canonical_study = ifelse(grepl("u.*", canonical_id), "userstudy", "llmvsllm"),
+    canonical_id = as.integer(substring(canonical_id, first = 2)),
+    dup_test_study = ifelse(grepl("u.*", dup_test_id), "userstudy", "llmvsllm"),
+    dup_test_id = as.integer(substring(dup_test_id, first = 2))
   )
-}
+mutant_mapping <- read.csv("rawdata/killmaps/dedup_mutant_mapping.csv", header = FALSE, col.names = c("dup_mutant_id", "canonical_id")) |>
+  mutate(
+    canonical_study = ifelse(grepl("u.*", canonical_id), "userstudy", "llmvsllm"),
+    canonical_id = as.integer(substring(canonical_id, first = 2)),
+    dup_mutant_study = ifelse(grepl("u.*", dup_mutant_id), "userstudy", "llmvsllm"),
+    dup_mutant_id = as.integer(substring(dup_mutant_id, first = 2))
+  )
 
-mutant_score_data <- function(study) {
   
-}
+ 
+full_map <- test_mapping |>
+  left_join(canonical_killmaps, join_by(canonical_id == test_id, canonical_study == test_study), relationship = "many-to-many") |>
+  rename(test_study = canonical_study) |>
+  right_join(mutant_mapping, join_by(mutant_id == canonical_id, mutant_study == canonical_study), relationship = "many-to-many") |>
+  select(dup_test_id, state, dup_mutant_id, test_study, mutant_study) |>
+  rename(test_id = dup_test_id, mutant_id = dup_mutant_id) |>
+  right_join(killmap_tests, join_by(test_id, test_study == study)) |>
+  right_join(killmap_mutants, join_by(mutant_id, mutant_study == study))
 
-load_messages <- function(study) {
-  if (!study %in% c("llmvsllm", "userstudy")) {
-    stop(paste("study must be llmvsllm or userstudy, was ", study))
-  }
+global_test_map <- full_map |>
+  summarise(
+    n = n(),
+    .by = c(test_id, test_study, mutant_actor, state)
+  ) |>
+  pivot_wider(
+    names_from = c(mutant_actor, state),
+    values_from = n,
+    values_fill = 0
+  ) |>
+  rename(
+    human_mutants_killed = Human_KILLED,
+    llm_mutants_killed = LLM_KILLED,
+    human_mutants_ignored = Human_SURVIVED,
+    llm_mutants_ignored = LLM_SURVIVED
+  )
+
+global_mutant_map <- full_map |>
+  summarise(
+    n = n(),
+    .by = c(mutant_id, mutant_study, test_actor, state)
+  ) |>
+  pivot_wider(
+    names_from = c(test_actor, state),
+    values_from = n,
+    values_fill = 0
+  ) |>
+  rename(
+    human_tests_killed_by = Human_KILLED,
+    llm_tests_killed_by = LLM_KILLED,
+    human_tests_survived = Human_SURVIVED,
+    llm_tests_survived = LLM_SURVIVED
+  )
   
   
-  readdbtable <- function(filename) {
-    read.csv(paste("rawdata", study, "db_tables", filename, sep = "/"), skipNul = TRUE) |>
-      rename_with(tolower)
-  }
+game_map <- full_map |>
+  filter(test_game_id == mutant_game_id, test_study == mutant_study) |>
+  rename(game_id = test_game_id, study = test_study) |>
+  select(!c(mutant_game_id, mutant_study))
+
+# Counts how many mutants were killed within the same game,
+# grouped by whether the mutant already existed at test creation
+time_test_map <- game_map |>
+  mutate(mutant_is_future = mutant_seconds >= test_seconds) |>
+  summarise(
+    n = n(),
+    .by = c(test_id, study, mutant_is_future, state)
+    ) |>
+  pivot_wider(
+    names_from = c(mutant_is_future, state),
+    values_from = n,
+    values_fill = 0
+  ) |>
+  rename(
+    existing_mutants_killed = FALSE_KILLED,
+    future_mutants_ignored = TRUE_SURVIVED,
+    future_mutants_killed = TRUE_KILLED,
+    existing_mutants_ignored = FALSE_SURVIVED
+  )
+
+time_mutant_map <- game_map |>
+  mutate(mutant_is_future = mutant_seconds >= test_seconds) |>
+  summarise(
+    n = n(),
+    .by = c(mutant_id, study, mutant_is_future, state)
+  ) |>
+  pivot_wider(
+    names_from = c(mutant_is_future, state),
+    values_from = n,
+    values_fill = 0
+  ) |>
+  rename(
+    future_tests_killed_by = FALSE_KILLED,
+    existing_tests_survived = TRUE_SURVIVED,
+    existing_tests_killed_by = TRUE_KILLED,
+    future_tests_survived = FALSE_SURVIVED
+  )
   
-  experiment <- readdbtable("experiment.csv") |>
-    filter(experiment_name == "study") |>
-    select(int_value)
+
+
+
+fresh_kill_map <- game_map |>
+  filter(mutant_seconds < test_seconds) |>
+  filter(state == "KILLED") |>
+  summarise(test_id = min(test_id), .by = c(mutant_id, study)) |>
+  summarise(fresh_killed_mutants = n(), .by = c(test_id, study))
   
-  conversations <- readdbtable("llm_conversations.csv") |>
+tests <- tests |>
+  left_join(fresh_kill_map, join_by(test_id, study)) |>
+  left_join(global_test_map, join_by(test_id, study == test_study)) |>
+  left_join(time_test_map, join_by(test_id, study)) |>
+  #mutate(
+  #  #fresh_killed_mutants = ifelse(is.na(fresh_killed_mutants), 0, fresh_killed_mutants)
+  #  
+  #  )
+  replace_na(
+    list(
+      fresh_killed_mutants = 0,
+      existing_mutants_killed = 0,
+      future_mutants_killed = 0,
+      existing_mutants_ignored = 0,
+      future_mutants_ignored = 0,
+      human_mutants_killed = 0,
+      llm_mutants_killed = 0,
+      human_mutants_ignored = 0,
+      llm_mutants_ignored = 0
+    )
+  ) |> mutate(
+    kill_rate = (human_mutants_killed + llm_mutants_killed) 
+    / (human_mutants_killed + human_mutants_ignored + llm_mutants_killed + llm_mutants_ignored) |>
+      replace_na(0),
+    human_kill_rate = (human_mutants_killed / (human_mutants_killed + human_mutants_ignored)) |>
+      replace_na(0),
+    llm_kill_rate = (llm_mutants_killed / (llm_mutants_killed + llm_mutants_ignored)) |>
+      replace_na(0),
+    existing_kill_rate = (existing_mutants_killed / (existing_mutants_killed + existing_mutants_ignored)) |>
+      replace_na(0),
+    future_kill_rate = (future_mutants_killed / (future_mutants_killed + future_mutants_ignored)) |>
+      replace_na(0)
+  )
+  
+mutants <- mutants |>
+  left_join(global_mutant_map, join_by(mutant_id, study == mutant_study)) |>
+  left_join(time_mutant_map, join_by(mutant_id, study)) |>
+  replace_na(list(
+    existing_tests_killed_by = 0,
+    future_tests_killed_by = 0,
+    existing_tests_surived = 0,
+    future_tests_surived = 0,
+    human_tests_killed_by = 0,
+    llm_tests_killed_by = 0,
+    human_tests_surived = 0,
+    llm_tests_surived = 0
+  )) |>
+  mutate(
+    has_been_killed = human_tests_killed_by + llm_tests_killed_by > 0,
+    evasion_rate = ((human_tests_survived + llm_tests_survived) 
+                    / (human_tests_survived + human_tests_killed_by + llm_tests_survived + llm_tests_killed_by)) |>
+      replace_na(0),
+    human_evasion_rate = (human_tests_survived / (human_tests_survived + human_tests_killed_by)) |>
+      replace_na(0),
+    llm_evasion_rate = (llm_tests_survived / (llm_tests_survived + llm_tests_killed_by)) |>
+      replace_na(0),
+    existing_evasion_rate = (existing_tests_survived / (existing_tests_survived + existing_tests_killed_by)) |>
+      replace_na(0),
+    future_evasion_rate = (future_tests_survived / (future_tests_survived + future_tests_killed_by)) |>
+      replace_na(0),
+  )
+
+  
+
+  #This contains all conversations, not just those that end with a successful
+  #test/mutant
+all_conversations <- tl(function(study) {
+  readdbtable("llm_conversations.csv", study) |>
     filter(study == "llmvsllm" | game_id != 345) |>
     filter(study == "userstudy" | game_id %in% experiment$int_value) |>
     mutate(
@@ -492,12 +426,13 @@ load_messages <- function(study) {
       type = factor(type),
       is_active = as.logical(is_active),
       is_success = as.logical(is_success)
-    )
+    )})
   
   
-  messages <- readdbtable("llm_messages.csv") |>
-    select(conversation_id, index_in_conversation, message_type, input_tokens, output_tokens, content) |>
-    inner_join(conversations, join_by(conversation_id)) |>
+all_messages <- tl(function(study) {
+  readdbtable("llm_messages.csv", study) |>
+    select(conversation_id, index_in_conversation, message_type, input_tokens, output_tokens, content)}) |>
+    inner_join(all_conversations, join_by(conversation_id, study)) |>
     mutate(
       rejection_reason = case_when(
         message_type != "SYSTEM" | index_in_conversation == 0 ~ NA,
@@ -525,14 +460,12 @@ load_messages <- function(study) {
         .default = "ERROR"
       )
     ) |>
-    mutate(rejection_reason = factor(rejection_reason)) |>
-    mutate(
-      mutant_id = ifelse(is.na(mutant_id), NA, paste(substr(study, start = 1, stop = 1), mutant_id, sep = "")),
-      test_id = ifelse(is.na(test_id), NA, paste(substr(study, start = 1, stop = 1), test_id, sep = "")),
-      conversation_id = ifelse(is.na(conversation_id), NA, paste(substr(study, start = 1, stop = 1), conversation_id, sep = ""))
-    )
-    
-}
+    mutate(rejection_reason = factor(rejection_reason)) #|>
+    #mutate(
+    #  mutant_id = ifelse(is.na(mutant_id), NA, paste(substr(study, start = 1, stop = 1), mutant_id, sep = "")),
+    #  test_id = ifelse(is.na(test_id), NA, paste(substr(study, start = 1, stop = 1), test_id, sep = "")),
+    #  conversation_id = ifelse(is.na(conversation_id), NA, paste(substr(study, start = 1, stop = 1), conversation_id, sep = ""))
+    #)
 
 
 round_1_survey <- read.csv("rawdata/questionnaires/CodeDefenders Studie zu LLM-Spielern - Runde 1.csv") |>
@@ -613,12 +546,11 @@ questionnaire <- read.csv("rawdata/questionnaires/CodeDefenders_Questionare_LLM_
   
   unique()
 
-all_tests <- load_tests("userstudy") |>
+tests <- tests |>
   left_join(rename_to_author(questionnaire), join_by(author_username)) |>
   left_join(rename_to_author(survey), join_by(author_username, round == author_round)) |>
   left_join(rename_to_opponent(questionnaire), join_by(opponent_username)) |>
-  left_join(rename_to_opponent(survey), join_by(opponent_username, round == opponent_round)) %>%
-  bind_rows(load_tests("llmvsllm")) |>
+  left_join(rename_to_opponent(survey), join_by(opponent_username, round == opponent_round)) |>
   mutate(author_actor = factor(ifelse(author_llm_or_human == "LLM", "LLM", author_actor), 
                         levels = c("low-skilled", "high-skilled", "LLM")
                         ),
@@ -626,12 +558,11 @@ all_tests <- load_tests("userstudy") |>
                                  levels = c("low-skilled", "high-skilled", "LLM")
          ))
 
-all_mutants <- load_mutants("userstudy") |>
+mutants <- mutants |>
   left_join(rename_to_author(questionnaire), join_by(author_username)) |>
   left_join(rename_to_author(survey), join_by(author_username, round == author_round)) |>
   left_join(rename_to_opponent(questionnaire), join_by(opponent_username)) |>
   left_join(rename_to_opponent(survey), join_by(opponent_username, round == opponent_round)) |>
-  bind_rows(load_mutants("llmvsllm")) |>
   mutate(
     author_actor = factor(ifelse(author_llm_or_human == "LLM", "LLM", author_actor),
                         levels = c("low-skilled", "high-skilled", "LLM")
@@ -641,7 +572,11 @@ all_mutants <- load_mutants("userstudy") |>
     ),
   )
 
+all_tests <- tests
+tests <- tests |> filter(!fails_against_cut, is_compiled)
 
+all_mutants <- mutants
+mutants <- mutants |> filter(is_compiled)
 
 
 
@@ -649,10 +584,10 @@ all_mutants <- load_mutants("userstudy") |>
 #therefore no killed/ignored mutants, these values should be changed to 0.
 # The very first test doesn't show up in the dedup data. I will have to figure
 #out why that is. Until then, they remain as NA.
-tmp <- killmap_data(tests = filter(all_tests, is_compiled), mutants = filter(all_mutants, is_compiled))
-tests <- tmp$tests
-mutants <- tmp$mutants
-rm(tmp)
+#tmp <- killmap_data(tests = filter(all_tests, is_compiled), mutants = filter(all_mutants, is_compiled))
+#tests <- tmp$tests
+#mutants <- tmp$mutants
+#rm(tmp)
 
 deftests <- tests |> 
   filter(!is_equivalence_test, !fails_against_cut)
@@ -681,8 +616,7 @@ attacker_games <- mutants |>
     points = sum(points), .groups = "drop_last"
   )
 
-all_messages <- load_messages("userstudy") |>
-  bind_rows(load_messages("llmvsllm")) |>
+all_messages <- all_messages |>
   inner_join(defender_games, join_by(game_id)) |>
   rename_with(.cols = starts_with("author"), \(text) sub("author", "defender", text)) |>
   rename_with(.cols = starts_with("opponent"), \(text) sub("opponent", "attacker", text))
