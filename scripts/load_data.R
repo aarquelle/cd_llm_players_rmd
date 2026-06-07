@@ -222,7 +222,7 @@ mutants <- tl(function(study) {
   
 killmap_tests <- tests |>
   filter(!fails_against_cut, is_compiled) |>
-  select(test_id, seconds_since_gamestart, game_id, author_llm_or_human, study) |>
+  select(test_id, seconds_since_gamestart, game_id, author_llm_or_human, is_equivalence_test, study) |>
   rename(test_seconds = seconds_since_gamestart, test_game_id = game_id, test_actor = author_llm_or_human)
 
 killmap_mutants <- mutants |>
@@ -233,34 +233,34 @@ killmap_mutants <- mutants |>
 canonical_killmaps <- read.csv("rawdata/killmaps/killmaps.csv", header = FALSE, col.names = c("test_id", "mutant_id", "state")) |>
   mutate(
     state = factor(state),
-    test_study = ifelse(grepl("u.*", test_id), "userstudy", "llmvsllm"),
+    test_study = factor(ifelse(grepl("u.*", test_id), "userstudy", ifelse(grepl("l.*", test_id), "llmvsllm", "ILLEGAL_ID"))),
     test_id = as.integer(substring(test_id, first = 2)),
-    mutant_study = ifelse(grepl("u.*", mutant_id), "userstudy", "llmvsllm"),
+    mutant_study = factor(ifelse(grepl("u.*", mutant_id), "userstudy", ifelse(grepl("l.*", mutant_id), "llmvsllm", "ILLEGAL_ID"))),
     mutant_id = as.integer(substring(mutant_id, first = 2))
     )
 test_mapping <- read.csv("rawdata/killmaps/dedup_test_mapping.csv", header = FALSE, col.names = c("dup_test_id", "canonical_id")) |>
   mutate(
-    canonical_study = ifelse(grepl("u.*", canonical_id), "userstudy", "llmvsllm"),
+    canonical_study = factor(ifelse(grepl("u.*", canonical_id), "userstudy", ifelse(grepl("l.*", canonical_id), "llmvsllm", "ILLEGAL_ID"))),
     canonical_id = as.integer(substring(canonical_id, first = 2)),
-    dup_test_study = ifelse(grepl("u.*", dup_test_id), "userstudy", "llmvsllm"),
+    dup_test_study = factor(ifelse(grepl("u.*", dup_test_id), "userstudy", ifelse(grepl("l.*", dup_test_id), "llmvsllm", "ILLEGAL_ID"))),
     dup_test_id = as.integer(substring(dup_test_id, first = 2))
   )
 mutant_mapping <- read.csv("rawdata/killmaps/dedup_mutant_mapping.csv", header = FALSE, col.names = c("dup_mutant_id", "canonical_id")) |>
   mutate(
-    canonical_study = ifelse(grepl("u.*", canonical_id), "userstudy", "llmvsllm"),
+    canonical_study = factor(ifelse(grepl("u.*", canonical_id), "userstudy", ifelse(grepl("l.*", canonical_id), "llmvsllm", "ILLEGAL_ID"))),
     canonical_id = as.integer(substring(canonical_id, first = 2)),
-    dup_mutant_study = ifelse(grepl("u.*", dup_mutant_id), "userstudy", "llmvsllm"),
+    dup_mutant_study = factor(ifelse(grepl("u.*", dup_mutant_id), "userstudy", ifelse(grepl("l.*", dup_mutant_id), "llmvsllm", "ILLEGAL_ID"))),
     dup_mutant_id = as.integer(substring(dup_mutant_id, first = 2))
   )
 
   
  
 full_map <- test_mapping |>
-  left_join(canonical_killmaps, join_by(canonical_id == test_id, canonical_study == test_study), relationship = "many-to-many") |>
-  rename(test_study = canonical_study) |>
+  left_join(canonical_killmaps, join_by(canonical_id == test_id, canonical_study == test_study), relationship = "many-to-many")|>
+  rename(test_study = dup_test_study) |>
   right_join(mutant_mapping, join_by(mutant_id == canonical_id, mutant_study == canonical_study), relationship = "many-to-many") |>
-  select(dup_test_id, state, dup_mutant_id, test_study, mutant_study) |>
-  rename(test_id = dup_test_id, mutant_id = dup_mutant_id) |>
+  select(dup_test_id, state, dup_mutant_id, test_study, dup_mutant_study) |>
+  rename(test_id = dup_test_id, mutant_id = dup_mutant_id, mutant_study = dup_mutant_study) |>
   right_join(killmap_tests, join_by(test_id, test_study == study)) |>
   right_join(killmap_mutants, join_by(mutant_id, mutant_study == study))
 
