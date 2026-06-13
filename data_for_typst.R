@@ -1,38 +1,139 @@
 #install.packages("svglite")
-
+#install.packages("readr")
 library(jsonlite)
 library(ggplot2)
 library(svglite)
+library(data.table)
+library(dplyr)
+library(glue)
+library(readr)
+library(scales)
 
-rm(list = ls())
+if (FALSE) {
+  rm(list = ls())
+  source("scripts/load_data.R")
+  dedup_tests_per_game <-  deftests |>
+    select(game_id, study, cut, author_llm_or_human, opponent_llm_or_human, test_file) |>
+    mutate(test_code = sapply(paste("rawdata/", study, "/datadir/", test_file, sep = ""), \(f) paste(read_lines(f), collapse = "\n"))) |>
+    summarise(n = n(), .by = c(game_id, study, cut, author_llm_or_human, opponent_llm_or_human, test_code))
+}
 
-theme_set(theme_bw(base_size = 20, base_family = "Libertinus Serif"))
-update_geom_defaults("text",  list(size = 7, family = "Libertinus Serif"))
+theme_set(theme_light(base_size = 20, base_family = "Libertinus Serif", header_family = "Libertinus Sans"))
+update_geom_defaults("text", list(size = 7, family = "Libertinus Serif"))
 
-source("scripts/load_data.R")
+add_test_code <- function(df) {
+  df |>
+    mutate(
+      test_code = read_file(paste("rawdata/", study, "/datadir/", test_file, sep = "")),
+      test_code = substring(test_code, first = regexpr("public void test()", test_code)[1])
+    )
+}
 
-pr <- function(plot, filename, width = 8.5, height = 5, ...) {
+
+pr <- function(plot,
+               filename,
+               width = 8.5,
+               height = 4,
+               ...) {
   ggsave(
-    paste("../typst_ba/images/", filename, ".svg", sep = ""), 
-    plot = plot, 
+    paste("../typst_ba/images/", filename, ".svg", sep = ""),
+    plot = plot,
     width = width,
     height = height,
     ...
   )
 }
 
+csv <- function(df, filename, row.names = FALSE) {
+  write.csv(df, file = paste("../typst_ba/data/tables/", filename, ".csv", sep = ""), row.names = row.names)
+}
+
+colors.opinion <- c("red", "orange", "grey", "cyan", "blue")
+colors.actor <- c(LLM = "turquoise3", Human = "thistle4")
+colors.quality <- c("#458B00", "darkgoldenrod3", "#8B1C62", "red4")
+colors.red <- "#BA2F2A"
+colors.green <- "#088158"
+colors.cut <- c(CharRange = "#E6B91E", ByteVector = "#90C226")
+
+scale_defender <- scale_fill_manual(values = colors.actor, name = "Defender")
+scale_attacker <- scale_fill_manual(values = colors.actor, name = "Attacker")
+scale_cut <- scale_fill_manual(values = colors.cut, name = "Class under Test")
+
+scale_percentage_bars <- function(dodge_value = 0.9, vjust = -0.2, with.percent = TRUE) {
+  list(
+    if (with.percent) scale_y_continuous(labels = percent, expand = expansion(mult = c(0, 0.1))) else scale_y_continuous(expand = expansion(mult = c(0, 0.1))),
+    geom_col(position = "dodge"),
+    geom_text(
+      aes(label = if(with.percent) percent(after_stat(y), accuracy = 0.1) else round(after_stat(y), digits = 2)),
+      position = position_dodge(dodge_value), 
+      vjust = vjust
+    )
+  )
+}
+
+# Groups by author_llm_or_human and cut, fills to the same as x
+scale_default_grouping <- function(type) {
+  if (! type %in% c("t", "m")) {
+    stop("type must be t or m")
+  }
+  list(
+    aes(x = author_llm_or_human, fill = author_llm_or_human),
+    scale_fill_manual(values = colors.actor),
+    facet_wrap( ~ cut),
+    labs(x = ifelse(type == "t", "Defender", "Attacker"), 
+         fill = ifelse(type == "t", "Defender", "Attacker"),)
+    
+  )
+}
+
+test_performance_plot <- function(.data, y, title = NULL, ylab = NULL, geom = geom_boxplot(show.legend = FALSE)) {
+  ggplot(.data, aes(x = author_llm_or_human, y = {{y}}, fill = author_llm_or_human)) +
+    geom +
+    facet_wrap(~ cut) +
+    labs(title = title, y = ylab, x = "Defender")
+}
+
+performance_binary_mean_cols <- function(.data, y, type, with.percent = TRUE, ...) {
+  .data |>
+    summarise(
+      {{y}} := mean({{y}}),
+      .by = c(author_llm_or_human, cut)
+    ) |>
+    ggplot(aes(y = {{y}})) +
+    scale_default_grouping(type) +
+    scale_percentage_bars(with.percent = with.percent, ...)
+}
+
+typst_defender_mutation_scores <- defender_games |> 
+  summarise(
+    mean = mean(mutation_score),
+    max = max(mutation_score, na.rm = TRUE),
+    min = min(mutation_score, na.rm = TRUE),
+    .by = c(cut, author_llm_or_human)
+  )
+
 list(
-  
   #Demographics
   number_participants = nrow(questionnaire),
-  demo_gender_female = questionnaire |> filter(gender == "female") |> nrow(),
-  demo_gender_male = questionnaire |> filter(gender == "male") |> nrow(),
-  demo_gender_nb = questionnaire |> filter(gender == "nonbinary") |> nrow(),
+  demo_gender = questionnaire |>
+    summarise(value = n(), .by = gender) |>
+    pivot_wider(names_from = gender),
   
-  demo_degree_ai = questionnaire |> filter(degree == "Artificial Intelligence") |> nrow(),
-  demo_degree_cs = questionnaire |> filter(degree == "Bachelor Informatik") |> nrow(),
-  demo_degree_ic = questionnaire |> filter(degree == "Bachelor Internet Computing") |> nrow(),
-  demo_degree_tp = questionnaire |> filter(degree == "Lehramt Informatik") |> nrow(),
+  demo_degree = questionnaire |>
+    summarise(value = n(), .by = degree) |>
+    mutate(degree = replace_values(
+      as.character(degree),
+      "Bachelor Informatik" ~ "Computer Science",
+      "Bachelor Internet Computing" ~ "Internet Computing",
+      "Artificial Intelligence" ~ "Artificial Intelligence",
+      "Lehramt Informatik" ~ "Computer Science for a teaching post"
+    )) |>
+    pivot_wider(names_from = degree),
+  
+  # filter(degree == "Artificial Intelligence") |> nrow(),
+  #demo_degree = questionnaire |> filter(degree == "Bachelor Informatik") |> nrow(),
+  #demo_degree = questionnaire |> filter(degree == "Bachelor Internet Computing") |> nrow(),
+  #demo_degree = questionnaire |> filter(degree == "Lehramt Informatik") |> nrow(),
   
   demo_ages = questionnaire$age,
   demo_semesters = questionnaire$semester,
@@ -43,54 +144,588 @@ list(
   
   loc = n_loc,
   
+  def_mutation_score_llm_bv = typst_defender_mutation_scores |> filter(author_llm_or_human == "LLM", cut == "ByteVector"),
+  def_mutation_score_human_bv = typst_defender_mutation_scores |> filter(author_llm_or_human == "Human", cut == "ByteVector"),
+  def_mutation_score_llm_cr = typst_defender_mutation_scores |> filter(author_llm_or_human == "LLM", cut == "CharRange"),
+  def_mutation_score_human_cr = typst_defender_mutation_scores |> filter(author_llm_or_human == "Human", cut == "CharRange"),
+  
+  test_point_mean_llm = mean((deftests |> filter(author_llm_or_human == "LLM"))[,"points"]),
+  test_point_mean_human = mean((deftests |> filter(author_llm_or_human == "Human"))[,"points"]),
+  test_point_median_llm = median((deftests |> filter(author_llm_or_human == "LLM"))[,"points"]),
+  test_point_median_human = median((deftests |> filter(author_llm_or_human == "Human"))[,"points"]),
+  test_point_75q_llm = quantile((deftests |> filter(author_llm_or_human == "LLM"))[,"points"], 0.75),
+  test_point_75q_human = quantile((deftests |> filter(author_llm_or_human == "Human"))[,"points"], 0.75),
+  
+  kill_rate_llm = mean((deftests |> filter(author_llm_or_human == "LLM"))[,"kill_rate"]),
+  kill_rate_human = mean((deftests |> filter(author_llm_or_human == "Human"))[,"kill_rate"]),
+  
+  llm_assertion_roulette = mean((deftests |> filter(author_llm_or_human == "LLM"))[, "smell_assertion_roulette"]),
+  human_assertion_roulette = mean((deftests |> filter(author_llm_or_human == "Human"))[, "smell_assertion_roulette"]),
+  
+  sensitive_equality_example = deftests |> 
+      filter(author_llm_or_human == "LLM", smell_sensitive_equality, !smell_eager_test, cut == "CharRange") |> 
+      head(1) |>
+      add_test_code() |>
+      select(test_code) |>
+      rename(typst_code = test_code),
+  
+  winrates_against_humans = attacker_games |>
+    inner_join(defender_games, join_by(game_id, cut, round), suffix = c(".attacker", ".defender"))|>
+    select(!starts_with("opponent")) |>
+    filter(author_llm_or_human.attacker == "Human") |>
+    mutate(winrate = points.defender > points.attacker) |>
+    summarise(winrate = mean(winrate), .by = c(cut, author_llm_or_human.defender)) |>
+    pivot_wider(names_from = c(cut, author_llm_or_human.defender), values_from = winrate),
+  
+  n_def_games_against_humans = defender_games |>
+    filter(opponent_llm_or_human == "Human") |>
+    summarise(value = n(), .by = c(cut, author_llm_or_human)) |>
+    pivot_wider(names_from = c(cut, author_llm_or_human)),
+  
+  defender_turing_test = defender_games |>
+    filter(opponent_llm_or_human == "Human") |>
+    mutate(
+      opponent_opinion_human_or_ai = recode_values(opponent_opinion_human_or_ai,
+        1 ~ "Human",
+        2 ~ "Human",
+        3 ~ "Unsure",
+        4 ~ "AI",
+        5 ~ "AI"
+      )
+    ) |>
+    summarise(value = n(), .by = c(author_llm_or_human, opponent_opinion_human_or_ai)) |>
+    pivot_wider(names_from = c(author_llm_or_human, opponent_opinion_human_or_ai), names_sep = " judged as "),
+  
+    
+  def_turing_point_ratios = attacker_games |>
+    inner_join(defender_games, join_by(game_id, cut, round), suffix = c(".attacker", ".defender"))|>
+    select(!starts_with("opponent")) |>
+    filter(author_llm_or_human.attacker == "Human") |>
+    mutate(
+      name = recode_values(
+        author_opinion_human_or_ai.attacker,
+        1 ~ "Human",
+        2 ~ "Human",
+        3 ~ "Unsure",
+        4 ~ "AI",
+        5 ~ "AI"
+      ),
+      value = points.defender / points.attacker
+    ) |>
+    select(name, value) |> 
+    summarise(value = mean(value), .by = name) |>
+    pivot_wider(),
+  
+  correlation_point_ratio_def_turing = (attacker_games |>
+    inner_join(defender_games, join_by(game_id, cut, round), suffix = c(".attacker", ".defender"))|>
+    select(!starts_with("opponent")) |>
+    filter(author_llm_or_human.attacker == "Human") |>
+    mutate(point_ratio = points.defender / points.attacker) %>%
+    lm(
+      author_opinion_human_or_ai.attacker ~ point_ratio + author_llm_or_human.defender,
+      data = .
+    ) |> summary())$coefficients[2,4],
+  
+  dedup_tests = dedup_tests_per_game |>
+    filter(author_llm_or_human == "LLM") |>
+    rename(number_of_tests = n) |>
+    summarise(n = n(), .by = c(number_of_tests)) |>
+    pivot_wider(names_from = number_of_tests, values_from = n),
+  
+  #mutation_scores_bv = defender_games |> 
+  #  filter(cut == "ByteVector") |>
+  #  summarise(
+  #    mean = mean(mutation_score),
+  #    max = max(mutation_score, na.rm = TRUE),
+  #    min = min(mutation_score, na.rm = TRUE),
+  #    .by = c( author_llm_or_human)
+  #    ),
+  #
+  #mutation_scores_cr = defender_games |> 
+  #  filter(cut == "CharRange") |>
+  #  summarise(
+  #    mean = mean(mutation_score),
+  #    max = max(mutation_score, na.rm = TRUE),
+  #    min = min(mutation_score, na.rm = TRUE),
+  #    .by = c( author_llm_or_human)
+  #  ),
+  
   
   dummy = 1
 ) |>
-  write_json("../typst_ba/data/r_data.json")
+  write_json("../typst_ba/data/r_data.json", pretty = TRUE)
 
-(questionnaire |>
-  pivot_longer(
-    cols = c(
-      java_experience, 
-      junit_experience
-    ),
-    names_to = "xp_type",
-    values_to = "xp_value"
-  ) |>
-  mutate(xp_type = recode_values(
-    xp_type,
-    "java_experience" ~ "Java experience",
-    "junit_experience" ~ "JUnit experience"
-  )) |>
-  summarise(n = n(), .by = c(xp_type, xp_value)) |>
-  
-  ggplot(aes(x = xp_type, y = n, fill = xp_value)) +
-  geom_col(position = "stack") +
-  geom_text(aes(label = after_stat(y)), position = position_stack(vjust = 0.5)) +
-  labs(fill = "Experience", x = NULL, y = "Count", 
-       title = "Experience of study participants")) |>
+
+
+
+
+(
+  questionnaire |>
+    pivot_longer(
+      cols = c(java_experience, junit_experience),
+      names_to = "xp_type",
+      values_to = "xp_value"
+    ) |>
+    mutate(
+      xp_type = recode_values(
+        xp_type,
+        "java_experience" ~ "Java experience",
+        "junit_experience" ~ "JUnit experience"
+      )
+    ) |>
+    summarise(n = n(), .by = c(xp_type, xp_value)) |>
+    
+    ggplot(aes(
+      x = xp_type, y = n, fill = xp_value
+    )) +
+    geom_col(position = "stack") +
+    geom_text(aes(label = after_stat(y)), position = position_stack(vjust = 0.5)) +
+    labs(
+      fill = "Experience",
+      x = NULL,
+      y = "Count"
+    )
+) |>
   pr("xp")
 
-(questionnaire |>
+(
+  questionnaire |>
     mutate(number_correct_questions = ordered(number_correct_questions)) |>
     summarise(n = n(), .by = c(number_correct_questions)) |>
-    ggplot(aes(x = "", y = n, fill = number_correct_questions)) +
+    ggplot(aes(
+      y = "", x = n, fill = number_correct_questions
+    )) +
     geom_col() +
     geom_text(aes(label = n), position = position_stack(vjust = 0.5)) +
-    labs(x = NULL, y = "Count", fill = "Number of correctly answered questions",
-         title = "Quiz results")) |>
-  pr("quiz")
-  
-  
-  (deftests |>
+    labs(
+      y = NULL,
+      x = "Count",
+      fill = "Correct answers"
+    )
+) |>
+  pr("quiz", height = 2.5)
+
+
+(
+  deftests |>
     separate_longer_delim(lines_covered, ",") |>
-    summarise(.by = c(lines_covered, game_id, cut, author_llm_or_human, opponent_llm_or_human)) |>
+    summarise(
+      .by = c(
+        lines_covered,
+        game_id,
+        cut,
+        author_llm_or_human,
+        opponent_llm_or_human
+      )
+    ) |>
     left_join(n_loc, join_by(cut)) |>
-    summarise(lines_covered = n(), .by = c(game_id, cut, author_llm_or_human, opponent_llm_or_human, loc_for_cut)) |>
+    summarise(
+      lines_covered = n(),
+      .by = c(
+        game_id,
+        cut,
+        author_llm_or_human,
+        opponent_llm_or_human,
+        loc_for_cut
+      )
+    ) |>
     mutate(line_coverage = lines_covered / loc_for_cut) |>
-    ggplot(aes(y = line_coverage, x = author_llm_or_human, fill = opponent_llm_or_human)) +
-    scale_default_grouping("t") + 
+    ggplot(
+      aes(y = line_coverage, fill = author_llm_or_human, x = cut)
+    ) +
+    
     geom_boxplot() +
-    labs(title = "Line coverage", y = "Line coverage") +
+    scale_defender +
+    labs(y = "Line coverage", x = "Class under test") +
     scale_y_continuous(labels = percent)
 ) |> pr("line_coverage")
+
+(
+  defender_games |>
+    ggplot(aes(y = mutation_score, fill = author_llm_or_human, x = cut)) +
+    geom_boxplot() +
+    scale_y_continuous(labels = percent) +
+    scale_defender +
+    labs(y = "Mutation score", x = "Class under test")
+) |> pr("mutation_scores_llm_performance")
+
+(
+  deftests |>
+    test_performance_plot(y = points, ylab = "Points")
+) |> pr("def_test_points")
+
+(
+  deftests |>
+    mutate(has_points = points > 0) |>
+    summarise(has_points = mean(has_points), .by = c(author_llm_or_human, cut)) |>
+    ggplot(aes(y = has_points, fill = author_llm_or_human, x = cut)) +
+    scale_defender +
+    scale_percentage_bars() +
+    labs(y = NULL, x = "Class under test")
+) |> pr("test_at_least_one")
+
+(
+  deftests |>
+    pivot_longer(
+      cols = c(kill_rate, llm_kill_rate, human_kill_rate, existing_kill_rate, future_kill_rate),
+      names_to = "kill_rate_type",
+      values_to = "kill_rate_value"
+    ) |>
+    mutate(kill_rate_type = factor(kill_rate_type, 
+                                   levels = c(
+                                     "kill_rate", 
+                                     "human_kill_rate", 
+                                     "llm_kill_rate", 
+                                     "existing_kill_rate",
+                                     "future_kill_rate"),
+                                   labels = c(
+                                     "Total kill rate",
+                                     "vs human mutants",
+                                     "vs llm mutants",
+                                     "vs existing mutants",
+                                     "vs future mutants"
+                                   ))) |>
+    ggplot(aes(x = author_llm_or_human, y = kill_rate_value, fill = author_llm_or_human)) + 
+    geom_boxplot(position = "dodge") + 
+    xlab("Defender") +
+    scale_y_continuous(name = "Kill rate", labels = percent) + 
+    scale_defender +
+    facet_wrap( ~ kill_rate_type)
+) |> pr("kill_rate_facet")
+
+(
+  deftests |>
+  
+    pivot_longer(starts_with("smell"), names_to = "smell_type", values_to = "smelly") |>
+    mutate(smell_type = factor(smell_type,
+      levels = c(
+        "smell_assertion_roulette",
+        "smell_duplicate_assert",
+        "smell_eager_test",
+        "smell_redundant_assertion",
+        "smell_sensitive_equality",
+        "smell_unknown_test"
+      ),
+      labels = c(
+        "Assertion roulette",
+        "Duplicate assertion",
+        "Eager test",
+        "Redundant assertion",
+        "Sensitive equality",
+        "Unknown test"
+      )
+    )) |>
+    summarise(
+      smelly = mean(smelly),
+      .by = c(cut, smell_type, author_llm_or_human)
+    ) |>
+    ggplot(aes(x = smelly, fill = author_llm_or_human, y = smell_type)) +
+    facet_grid(cut ~ .) +
+    geom_col(position = "dodge") +
+    scale_defender +
+    labs(y = "Smell type", x = NULL)
+) |> pr("test_smells")
+
+(
+  deftests |>
+    summarise(
+      across(starts_with("smell"), \(name) paste(100*round(mean(name), digits = 4), "%", sep = "")),
+      .by = c(cut, author_llm_or_human)
+    ) |>
+    arrange(cut, author_llm_or_human) |>
+    pivot_longer(starts_with("smell"), names_to = "Smell type") |>
+    pivot_wider(names_from = c(cut, author_llm_or_human), names_glue = "{author_llm_or_human} ({cut})") |>
+    mutate(`Smell type` = factor(`Smell type`,
+                               levels = c(
+                                 "smell_assertion_roulette",
+                                 "smell_duplicate_assert",
+                                 "smell_eager_test",
+                                 "smell_redundant_assertion",
+                                 "smell_sensitive_equality",
+                                 "smell_unknown_test"
+                               ),
+                               labels = c(
+                                 "Assertion roulette",
+                                 "Duplicate assertion",
+                                 "Eager test",
+                                 "Redundant assertion",
+                                 "Sensitive equality",
+                                 "Unknown test"
+                               )
+    ))
+    
+) |> csv("test_smells")
+
+(
+  attacker_games |>
+    inner_join(defender_games, join_by(game_id, cut, round), suffix = c(".attacker", ".defender"))|>
+    select(!starts_with("opponent")) |>
+    mutate(point_ratio = points.defender / ifelse(points.attacker != 0, points.attacker, 1)) |>
+    filter(author_llm_or_human.attacker == "Human") |>
+    ggplot(aes(x = cut, fill = author_llm_or_human.defender, y = point_ratio)) +
+    geom_boxplot() +
+    scale_defender +
+    labs(y = "Defender point ratio", x = "Class under Test")
+) |> pr("point_ratios")
+
+(
+  deftests |>
+    filter(opponent_llm_or_human == "Human") |>
+    summarise(.by = c(
+      game_id,
+      study, 
+      author_llm_or_human,
+      opponent_opinion_human_or_ai, 
+      opponent_opinion_challenged, 
+      opponent_opinion_judged_original,
+      opponent_opinion_judged_programming_skill
+    )) |>
+    pivot_longer(
+      cols = c(
+        opponent_opinion_human_or_ai, 
+        opponent_opinion_challenged, 
+        opponent_opinion_judged_original, 
+        opponent_opinion_judged_programming_skill
+        ),
+      names_to = "question",
+      values_to = "answer"  
+      ) |>
+    mutate(
+      question = factor(question,
+        levels = c(
+          "opponent_opinion_human_or_ai",
+          "opponent_opinion_challenged",
+          "opponent_opinion_judged_original",
+          "opponent_opinion_judged_programming_skill"
+        ), labels = c(
+          "Human or AI?",
+          "Challenging?",
+          "Resourceful?",
+          "Skillful?"
+        )
+      ),
+      answer = ordered(answer),
+      author_llm_or_human = factor(author_llm_or_human,
+                                   levels = c("LLM", "Human"),
+                                   labels = c("LLM Defender", "Human Defender")
+                                   )
+    ) |>
+    summarise(n = n(), .by = c(question, author_llm_or_human, answer)) |>
+    ggplot(aes(y = question, fill = answer, x = n)) +
+    facet_grid(author_llm_or_human ~ .) +
+    geom_col(position = position_stack(reverse = TRUE)) +
+    geom_text(aes(label = n), position = position_stack(0.5, reverse = TRUE)) +
+    labs(y = NULL, x = NULL, fill = "Answer")
+) |> pr("defender_opponent_opinions")
+
+(
+  mutants |>
+    filter(opponent_llm_or_human == "Human") |>
+    summarise(.by = c(
+      game_id,
+      study, 
+      author_llm_or_human,
+      opponent_opinion_human_or_ai, 
+      opponent_opinion_challenged, 
+      opponent_opinion_judged_original,
+      opponent_opinion_judged_programming_skill
+    )) |>
+    pivot_longer(
+      cols = c(
+        opponent_opinion_human_or_ai, 
+        opponent_opinion_challenged, 
+        opponent_opinion_judged_original, 
+        opponent_opinion_judged_programming_skill
+      ),
+      names_to = "question",
+      values_to = "answer"  
+    ) |>
+    mutate(
+      question = factor(question,
+                        levels = c(
+                          "opponent_opinion_human_or_ai",
+                          "opponent_opinion_challenged",
+                          "opponent_opinion_judged_original",
+                          "opponent_opinion_judged_programming_skill"
+                        ), labels = c(
+                          "Human or AI?",
+                          "Challenging?",
+                          "Resourceful?",
+                          "Skillful?"
+                        )
+      ),
+      answer = ordered(answer),
+      author_llm_or_human = factor(author_llm_or_human,
+                                   levels = c("LLM", "Human"),
+                                   labels = c("LLM Attacker", "Human Attacker")
+      )
+    ) |>
+    summarise(n = n(), .by = c(question, author_llm_or_human, answer)) |>
+    ggplot(aes(y = question, fill = answer, x = n)) +
+    facet_grid(author_llm_or_human ~ .) +
+    geom_col(position = position_stack(reverse = TRUE)) +
+    geom_text(aes(label = n), position = position_stack(0.5, reverse = TRUE)) +
+    labs(y = NULL, x = NULL, fill = "Answer")
+) |> pr("attacker_opponent_opinions")
+
+
+turing_defender_reasons <- attacker_games |>
+  inner_join(defender_games, join_by(game_id, cut, round), suffix = c(".attacker", ".defender"))|>
+  select(!starts_with("opponent")) |>
+  filter(author_llm_or_human.attacker == "Human") |>
+  mutate(
+    winner = ifelse(points.attacker > points.defender, "Attacker wins", "Defender wins"),
+    judged = recode_values(
+      author_opinion_human_or_ai.attacker,
+        1 ~ "Human",
+        2 ~ "Human",
+        3 ~ "Unsure",
+        4 ~ "AI",
+        5 ~ "AI"
+      ),
+    point_ratio = points.defender / points.attacker
+    ) |>
+  select(winner, point_ratio, author_llm_or_human.defender, judged, author_opinion_human_or_ai_reason.attacker) |> 
+  arrange(author_llm_or_human.defender, judged)
+
+turing_attacker_reasons <- attacker_games |>
+  inner_join(defender_games, join_by(game_id, cut, round), suffix = c(".attacker", ".defender"))|>
+  select(!starts_with("opponent")) |>
+  filter(author_llm_or_human.defender == "Human") |>
+  mutate(
+    winner = ifelse(points.attacker > points.defender, "Attacker wins", "Defender wins"),
+    judged = recode_values(
+      author_opinion_human_or_ai.defender,
+      1 ~ "Human",
+      2 ~ "Human",
+      3 ~ "Unsure",
+      4 ~ "AI",
+      5 ~ "AI"
+    ),
+    point_ratio = points.attacker / points.defender
+  ) |>
+  select(winner, point_ratio, author_llm_or_human.attacker, judged, author_opinion_human_or_ai_reason.defender) |> 
+  arrange(author_llm_or_human.attacker, judged)
+
+(
+  deftests |>
+    #filter(opponent_llm_or_human == "Human") |>
+    summarise(fresh_killed_mutants = mean(fresh_killed_mutants), .by = c(author_llm_or_human, cut, opponent_llm_or_human)) |>
+    mutate(opponent_llm_or_human = paste(opponent_llm_or_human, "Attacker")) |>
+    ggplot(aes(y = fresh_killed_mutants, x = cut, fill = author_llm_or_human)) +
+    geom_col(position = "dodge") +
+    scale_percentage_bars(with.percent = FALSE) +
+    scale_defender +
+    labs(y = "Average kills", fill = "Defender", x = "Class under Test") +
+    facet_wrap( ~ opponent_llm_or_human)
+) |> pr("fresh_kills")
+
+
+significance_string <- function(p) {
+  s <- if (p < 0.001) {
+    "***"
+  } else if (p < 0.01) {
+    "**"
+  } else if (p < 0.05) {
+    "*"
+  } else if (p < 0.1) {
+    "."
+  } else {
+    ""
+  }
+  paste(percent(p, accuracy = 0.0001, drop0trailing = TRUE), s, sep = " ")
+}
+
+# Creates a df with the estimates and p-values of how each dependent variable
+# is correlated to the independent variable
+run_regressions <- function(df, independent_var, dependent_vars) {
+  
+  results <- lapply(dependent_vars, function(dep_var) {
+    
+    formula <- as.formula(paste(dep_var, "~", independent_var))
+    model   <- lm(formula, data = df)
+    coefs   <- summary(model)$coefficients
+    
+    # Extract the row for the independent variable
+    data.frame(
+      ` ` = dep_var,
+      `Estimate` = round(coefs[independent_var, "Estimate"], digits = 4),
+      `Std. Error` = round(coefs[independent_var, "Std. Error"], digits = 4),
+      `p-value` = significance_string(coefs[independent_var, "Pr(>|t|)"]),
+      check.names = FALSE,
+      row.names = NULL
+    )
+  })
+  
+  do.call(rbind, results)
+}
+
+
+defender_games |>
+  filter(opponent_llm_or_human == "Human") |>
+  mutate(is_human = as.numeric(author_llm_or_human == "Human")) |>
+  run_regressions("is_human", c(
+    "opponent_opinion_judged_programming_skill",
+    "opponent_opinion_judged_original",
+    "opponent_opinion_challenged", 
+    "opponent_opinion_human_or_ai"
+    )) |>
+  mutate(
+    ` ` = factor(` `,
+                 levels = c(
+                   "opponent_opinion_human_or_ai",
+                   "opponent_opinion_challenged",
+                   "opponent_opinion_judged_original",
+                   "opponent_opinion_judged_programming_skill"
+                 ), labels = c(
+                   "Human or AI?",
+                   "Challenging?",
+                   "Resourceful?",
+                   "Skillful?"
+                 )
+    )
+  ) |>
+  csv("def_opinion_regressions")
+
+attacker_games |>
+  filter(opponent_llm_or_human == "Human") |>
+  mutate(is_human = as.numeric(author_llm_or_human == "Human")) |>
+  run_regressions("is_human", c(
+    "opponent_opinion_judged_programming_skill",
+    "opponent_opinion_judged_original",
+    "opponent_opinion_challenged", 
+    "opponent_opinion_human_or_ai"
+  )) |>
+  mutate(
+    ` ` = factor(` `,
+                      levels = c(
+                        "opponent_opinion_human_or_ai",
+                        "opponent_opinion_challenged",
+                        "opponent_opinion_judged_original",
+                        "opponent_opinion_judged_programming_skill"
+                      ), labels = c(
+                        "Human or AI?",
+                        "Challenging?",
+                        "Resourceful?",
+                        "Skillful?"
+                      )
+                  )
+    ) |>
+  csv("att_opinion_regressions")
+
+
+(
+  mutants |> 
+    filter(has_been_killed) |>
+    mutate(
+      defeated = existing_tests_killed_by + future_tests_killed_by > 0,
+      author_llm_or_human = paste(author_llm_or_human, "Attacker")  
+    ) |>
+    summarise(defeated = mean(defeated), .by = c(cut, author_llm_or_human, opponent_llm_or_human)) |>
+    ggplot(aes(y = defeated, x = cut, fill = opponent_llm_or_human)) +
+    #geom_col(position = "dodge") +
+    scale_percentage_bars() +
+    scale_defender +
+    facet_wrap( ~ author_llm_or_human) + 
+    labs(y = NULL, x = "Class under Test")
+) |> pr("eventual_defeat_rate_tests")

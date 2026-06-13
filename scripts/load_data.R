@@ -1,8 +1,10 @@
 rm(list = ls())
+#install.packages("filecacher")
 
 library(dplyr)
 library(stringr)
 library(tidyr)
+library(filecacher)
 
 experience_levels <- c("< 3 Monate", 
                        ">= 3 Monate && < 6 Monate", 
@@ -222,7 +224,7 @@ mutants <- tl(function(study) {
   
 killmap_tests <- tests |>
   filter(!fails_against_cut, is_compiled) |>
-  select(test_id, seconds_since_gamestart, game_id, author_llm_or_human, is_equivalence_test, study) |>
+  select(test_id, seconds_since_gamestart, game_id, author_llm_or_human, is_equivalence_test, cut, study) |>
   rename(test_seconds = seconds_since_gamestart, test_game_id = game_id, test_actor = author_llm_or_human)
 
 killmap_mutants <- mutants |>
@@ -325,6 +327,7 @@ time_test_map <- game_map |>
   )
 
 time_mutant_map <- game_map |>
+  filter(!is_equivalence_test) |>
   mutate(mutant_is_future = mutant_seconds >= test_seconds) |>
   summarise(
     n = n(),
@@ -341,8 +344,6 @@ time_mutant_map <- game_map |>
     existing_tests_killed_by = TRUE_KILLED,
     future_tests_survived = FALSE_SURVIVED
   )
-  
-
 
 
 fresh_kill_map <- game_map |>
@@ -578,6 +579,29 @@ tests <- tests |> filter(!fails_against_cut, is_compiled)
 all_mutants <- mutants
 mutants <- mutants |> filter(is_compiled)
 
+deftests <- tests |> 
+  filter(!is_equivalence_test, !fails_against_cut)
+
+n_not_equivalent_mutant <- mutants |>
+  filter(has_been_killed) |>
+  summarise(
+    number_of_mutants_in_cut = n(), .by = cut
+  )
+
+mutant_scores <- full_map |>
+  filter(
+    paste(test_id, test_study) %in% paste(deftests$test_id, deftests$study), 
+    state == "KILLED"
+    ) |>
+  summarise(
+    .by = c(cut, test_game_id, test_study, mutant_study, mutant_id)
+  ) |>
+  summarise(
+    unique_mutants_killed = n(),
+    .by = c(cut, test_game_id, test_study)
+  ) |> 
+  left_join(n_not_equivalent_mutant, join_by(cut)) |>
+  mutate(mutation_score = unique_mutants_killed / number_of_mutants_in_cut)
 
 
 # Killmaps data for tests contains 2 rows with NAs: One test has no coverage and
@@ -589,20 +613,21 @@ mutants <- mutants |> filter(is_compiled)
 #mutants <- tmp$mutants
 #rm(tmp)
 
-deftests <- tests |> 
-  filter(!is_equivalence_test, !fails_against_cut)
+
 
 defender_games <- deftests |>
   group_by(
-    game_id, 
+    game_id,
+    study,
     across(starts_with("author_")), 
     across(starts_with("opponent_")),
     cut,
     round
   ) |>
   summarise(
-    points = sum(points), .groups = "drop_last"
-  )
+    points = sum(points), .groups = "drop"
+  ) |> 
+  left_join(mutant_scores, join_by(game_id == test_game_id, study == test_study, cut))
 
 attacker_games <- mutants |>
   group_by(
@@ -613,7 +638,7 @@ attacker_games <- mutants |>
     round
   ) |>
   summarise(
-    points = sum(points), .groups = "drop_last"
+    points = sum(points), .groups = "drop"
   )
 
 all_messages <- all_messages |>
@@ -641,3 +666,6 @@ n_loc <- tests |>
   separate_longer_delim(lines_covered, ",") |>
   unique() |>
   summarise(loc_for_cut = n(), .by = cut)
+
+
+

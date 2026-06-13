@@ -1229,6 +1229,21 @@ games |>
   facet_wrap( ~ cut)
 ```
 
+## Mutation scores
+
+How many of the totality of (non-equivalent) mutants can the complete test suite kill?
+
+```{r}
+defender_games |>
+  ggplot(aes(y = mutation_score)) +
+  scale_default_grouping("t") +
+  geom_boxplot() +
+  scale_y_continuous(labels = percent) +
+  labs(title = "Mutation scores", y = "Mutation score")
+  
+```
+
+
 
 # Token costs
 
