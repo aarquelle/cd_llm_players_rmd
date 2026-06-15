@@ -5,6 +5,8 @@ library(dplyr)
 library(stringr)
 library(tidyr)
 library(filecacher)
+library(stringr)
+library(purrr)
 
 experience_levels <- c("< 3 Monate", 
                        ">= 3 Monate && < 6 Monate", 
@@ -18,6 +20,48 @@ experience_labels <- c("< 3 months",
                        ">= 6 months && < 1 year",
                        ">= 1 year && < 3 years",
                        ">= 3 years")
+
+CharRange_mapping <- function(l) {
+  l <- as.integer(l)
+  case_when(
+    l < 6 ~ "Documentation",
+    l < 8 ~ "Class declaration",
+    l < 18 ~ "Fields",
+    l < 45 ~ "Constructor",
+    l < 57 ~ "is()",
+    l < 69 ~ "isNot()",
+    l < 82 ~ "isIn()",
+    l < 95 ~ "isNotIn()",
+    l < 106 ~ "getStart()",
+    l < 115 ~ "getEnd()",
+    l < 127 ~ "isNegated()",
+    l < 139 ~ "contains(char)",
+    l < 161 ~ "contains(CharRange)",
+    l < 184 ~ "equals()",
+    l < 194 ~ "hashCode()",
+    l <= 217 ~ "toString()"
+  )
+}
+
+ByteVector_mapping <- function(l) {
+  l <- as.integer(l)
+  case_when(
+    l < 6 ~ "Documentation",
+    l < 8 ~ "Class declaration",
+    l < 18 ~ "Fields",
+    l < 26 ~ "ByteVector()",
+    l < 36 ~ "ByteVector(int)",
+    l < 53 ~ "putByte()",
+    l < 73 ~ "put11()",
+    l < 92 ~ "putShort()",
+    l < 113 ~ "put12()",
+    l < 134 ~ "putInt()",
+    l < 161 ~ "putLong()",
+    l < 226 ~ "putUTF8()",
+    l < 248 ~ "putByteArray()",
+    l <= 262 ~ "enlarge()"
+  )
+}
 
 
 readdbtable <- function(filename, study) {
@@ -220,7 +264,12 @@ mutants <- tl(function(study) {
     is_compiled = classfile
   ) |>
   left_join(experiment, join_by(game_id == int_value, study)) |> 
-  filter(study == "userstudy" | is_valid_experiment)
+  filter(study == "userstudy" | is_valid_experiment) |>
+  mutate(mutated_methods = map2_chr(strsplit(mutatedlines, ","), cut, function(x, cut_val) {
+    mapping_function <- if (cut_val == "CharRange") CharRange_mapping else ByteVector_mapping
+    vals <- sapply(as.numeric(x), mapping_function)
+    paste(unique(vals), collapse = ",")
+  }))
   
 killmap_tests <- tests |>
   filter(!fails_against_cut, is_compiled) |>
@@ -283,6 +332,19 @@ global_test_map <- full_map |>
     llm_mutants_ignored = LLM_SURVIVED
   )
 
+equivalence_mutant_map <- full_map |>
+  summarise(n = n(), .by = c(mutant_id, mutant_study, is_equivalence_test, state)) |>
+  pivot_wider(
+    names_from = c(is_equivalence_test, state),
+    values_from = n,
+    values_fill = 0
+  ) |> rename(
+    deftests_killed_by = "FALSE_KILLED",
+    deftests_survived = "FALSE_SURVIVED",
+    eqtests_killed_by = "TRUE_KILLED",
+    eqtests_survived = "TRUE_SURVIVED"
+  )
+
 global_mutant_map <- full_map |>
   summarise(
     n = n(),
@@ -299,6 +361,7 @@ global_mutant_map <- full_map |>
     human_tests_survived = Human_SURVIVED,
     llm_tests_survived = LLM_SURVIVED
   )
+
   
   
 game_map <- full_map |>
@@ -351,6 +414,8 @@ fresh_kill_map <- game_map |>
   filter(state == "KILLED") |>
   summarise(test_id = min(test_id), .by = c(mutant_id, study)) |>
   summarise(fresh_killed_mutants = n(), .by = c(test_id, study))
+
+
   
 tests <- tests |>
   left_join(fresh_kill_map, join_by(test_id, study)) |>
@@ -389,6 +454,7 @@ tests <- tests |>
 mutants <- mutants |>
   left_join(global_mutant_map, join_by(mutant_id, study == mutant_study)) |>
   left_join(time_mutant_map, join_by(mutant_id, study)) |>
+  left_join(equivalence_mutant_map, join_by(mutant_id, study == mutant_study)) |>
   replace_na(list(
     existing_tests_killed_by = 0,
     future_tests_killed_by = 0,
@@ -397,7 +463,11 @@ mutants <- mutants |>
     human_tests_killed_by = 0,
     llm_tests_killed_by = 0,
     human_tests_surived = 0,
-    llm_tests_surived = 0
+    llm_tests_surived = 0,
+    deftests_survived = 0,
+    deftests_killed_by = 0,
+    eqtests_survived = 0,
+    eqtests_killed_by = 0
   )) |>
   mutate(
     has_been_killed = human_tests_killed_by + llm_tests_killed_by > 0,

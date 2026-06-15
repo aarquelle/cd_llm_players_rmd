@@ -1,5 +1,6 @@
 #install.packages("svglite")
 #install.packages("readr")
+#install.packages("ineq")
 library(jsonlite)
 library(ggplot2)
 library(svglite)
@@ -8,6 +9,8 @@ library(dplyr)
 library(glue)
 library(readr)
 library(scales)
+library(patchwork)
+library(ineq)
 
 if (FALSE) {
   rm(list = ls())
@@ -41,6 +44,58 @@ pr <- function(plot,
     width = width,
     height = height,
     ...
+  )
+}
+
+fixed_gini <- function(data_vector, n) {
+  #print(paste("data_vector", data_vector))
+  #print(paste("n", n))
+  #if (length(data_vector) > n) {
+  #  stop("data has more rows than n")
+  #}
+  data_vector <- append(data_vector, rep(0, n - length(data_vector)))
+  Gini(data_vector)
+}
+
+CharRange_mapping <- function(l) {
+  l <- as.integer(l)
+  case_when(
+    l < 6 ~ "Documentation",
+    l < 8 ~ "Class declaration",
+    l < 18 ~ "Fields",
+    l < 45 ~ "Constructor",
+    l < 57 ~ "is()",
+    l < 69 ~ "isNot()",
+    l < 82 ~ "isIn()",
+    l < 95 ~ "isNotIn()",
+    l < 106 ~ "getStart()",
+    l < 115 ~ "getEnd()",
+    l < 127 ~ "isNegated()",
+    l < 139 ~ "contains(char)",
+    l < 161 ~ "contains(CharRange)",
+    l < 184 ~ "equals()",
+    l < 194 ~ "hashCode()",
+    l <= 217 ~ "toString()"
+  )
+}
+
+ByteVector_mapping <- function(l) {
+  l <- as.integer(l)
+  case_when(
+    l < 6 ~ "Documentation",
+    l < 8 ~ "Class declaration",
+    l < 18 ~ "Fields",
+    l < 26 ~ "ByteVector()",
+    l < 36 ~ "ByteVector(int)",
+    l < 53 ~ "putByte()",
+    l < 73 ~ "put11()",
+    l < 92 ~ "putShort()",
+    l < 113 ~ "put12()",
+    l < 134 ~ "putInt()",
+    l < 161 ~ "putLong()",
+    l < 226 ~ "putUTF8()",
+    l < 248 ~ "putByteArray()",
+    l <= 262 ~ "enlarge()"
   )
 }
 
@@ -231,6 +286,44 @@ list(
     rename(number_of_tests = n) |>
     summarise(n = n(), .by = c(number_of_tests)) |>
     pivot_wider(names_from = number_of_tests, values_from = n),
+  
+  double_eq = mutants |>
+    mutate(kbe = eqtests_killed_by > 0, kbd = deftests_killed_by > 0) |>
+    summarise(kbe = mean(kbe), .by = c(opponent_llm_or_human, kbd)) |> 
+    filter(!kbd) |>
+    select(opponent_llm_or_human, kbe) |>
+    pivot_wider(names_from = opponent_llm_or_human, values_from = kbe),
+  
+  p_opponent_equivalent = (lm(
+    !has_been_killed ~
+      author_llm_or_human +
+      cut +
+      opponent_llm_or_human
+    , data = mutants
+  ) |> summary())$coefficients["opponent_llm_or_humanHuman", "Pr(>|t|)"],
+  
+  n_mutated_lines = mutants |>
+    summarise(across(number_mutated_lines, mean), .by =author_llm_or_human) |>
+    pivot_wider(names_from = author_llm_or_human, values_from = number_mutated_lines),
+  
+  mutant_methods_gini_bv = mutants |>
+    filter(cut == "ByteVector") |>
+    separate_longer_delim(mutated_methods, ",") |>
+    mutate(mutated_methods = factor(mutated_methods)) |>
+    summarise(n = n(), .by = c(author_llm_or_human, game_id, mutated_methods)) |>
+    summarise(gini = fixed_gini(n, length(levels(mutated_methods))), .by = c(author_llm_or_human, game_id)) |>
+    summarise(gini = mean(gini), .by = author_llm_or_human) |>
+    pivot_wider(values_from = gini, names_from = author_llm_or_human),
+  
+  total_llm_mutant_method_gini_bv = (mutants |>
+      filter(cut == "ByteVector", author_llm_or_human == "LLM") |>
+      summarise(n = n(), .by = mutated_methods) |>
+      summarise(gini = Gini(n)))$gini,
+    
+    
+    
+  n_mutants_with_multiple_methods = mutants |> filter(grepl(",", fixed = TRUE, mutated_methods)) |> nrow(),
+    
   
   #mutation_scores_bv = defender_games |> 
   #  filter(cut == "ByteVector") |>
@@ -729,3 +822,181 @@ attacker_games |>
     facet_wrap( ~ author_llm_or_human) + 
     labs(y = NULL, x = "Class under Test")
 ) |> pr("eventual_defeat_rate_tests")
+
+
+
+
+
+
+
+(
+  equivalent_rate = mutants |>
+    mutate(is_equivalent = !has_been_killed) |>
+    summarise(is_equivalent = mean(is_equivalent), .by = c(cut, author_llm_or_human, opponent_llm_or_human)) |>
+    ggplot(aes(x = author_llm_or_human, fill = opponent_llm_or_human, y = is_equivalent)) +
+    scale_percentage_bars() +
+    facet_wrap(~ cut) + 
+    labs(x = "Attacker", y = "Equivalence rate") +
+    scale_defender
+) |> pr("eq_rates")
+
+mutants |>
+  summarise(
+    across(c(eqtests_survived, eqtests_killed_by, deftests_killed_by, deftests_survived), mean),
+    .by = c(author_llm_or_human, opponent_llm_or_human, cut)
+  )
+
+mutants |> 
+  filter(deftests_killed_by == 0) |>
+  select(c(eqtests_survived, eqtests_killed_by, deftests_killed_by, deftests_survived))
+
+mutants |> 
+  select(c(opponent_llm_or_human, eqtests_survived, eqtests_killed_by, deftests_killed_by, deftests_survived)) |>
+  summarise(n = n(), .by = c(deftests_killed_by, opponent_llm_or_human))
+
+mutants |>
+  mutate(kbe = eqtests_killed_by > 0, kbd = deftests_killed_by > 0) |>
+  summarise(kbe = mean(kbe), .by = c(opponent_llm_or_human, kbd)) |> 
+  filter(!kbd) |>
+  select(opponent_llm_or_human, kbe) |>
+  pivot_wider(names_from = opponent_llm_or_human, values_from = kbe)
+
+(
+  mutants |>
+    filter(has_been_killed) |>
+    pivot_longer(
+      cols = c(evasion_rate, llm_evasion_rate, human_evasion_rate, existing_evasion_rate, future_evasion_rate),
+      names_to = "evasion_rate_type",
+      values_to = "evasion_rate_value"
+    ) |>
+    mutate(evasion_rate_type = factor(evasion_rate_type, 
+                                      levels = c(
+                                        "evasion_rate", 
+                                        "human_evasion_rate", 
+                                        "llm_evasion_rate", 
+                                        "existing_evasion_rate",
+                                        "future_evasion_rate"),
+                                      labels = c(
+                                        "Total evasion rate",
+                                        "Against human tests",
+                                        "Against llm tests",
+                                        "Against existing tests",
+                                        "Against future tests"
+                                      ))) |>
+    ggplot(aes(x = author_llm_or_human, y = evasion_rate_value, fill = opponent_llm_or_human)) + 
+    geom_boxplot(position = "dodge") + 
+    xlab("Attacker") +
+    scale_y_continuous(name = "Evasion rate", labels = percent) + 
+    scale_fill_manual(name = "Defender", values = colors.actor) +
+    facet_wrap( ~ evasion_rate_type)#todo: diamond for means??
+) |> pr("evasion_rates")
+
+coverage_plot <- function(.data, type) {
+  if (! type %in% c("t", "m")) {
+    stop("type must be t or m")
+  }
+  old_lines <- if (type == "t") "lines_covered" else "mutatedlines"
+  old_id <- if (type == "t") "test_id" else "mutant_id"
+  
+  .data |>
+    rename(.lines = !!sym(old_lines)) |>
+    rename(.id = !!sym(old_id)) |>
+    select(author_llm_or_human, opponent_llm_or_human, .lines, .id) |>
+    separate_longer_delim(.lines, delim=",") |>
+    unique() |>
+    mutate(linecount = 1) |>
+    pivot_wider(
+      names_from = .lines, 
+      values_from = linecount, 
+      names_prefix = "lineno_",
+      values_fill = 0
+    ) |>
+    summarise(across(starts_with("lineno_"), mean), .by = c(
+      "author_llm_or_human",
+      "opponent_llm_or_human"
+    )) |>
+    pivot_longer(
+      cols = starts_with("lineno_"),
+      names_to = "line_number",
+      names_prefix = "lineno_",
+      values_to = "line_mean",
+      names_transform = as.integer
+    ) |>
+    mutate(
+      author_llm_or_human = paste(author_llm_or_human, if (type == "t") "Defender" else "Attacker"),
+      opponent_llm_or_human = paste(opponent_llm_or_human, if (type == "m") "Defender" else "Attacker")) |>
+    ggplot(aes(x = line_number, y = line_mean)) +
+    geom_col() +
+    facet_grid(author_llm_or_human ~ opponent_llm_or_human) +
+    scale_y_continuous(labels = percent)
+}
+
+(mutants |>
+  filter(cut == "CharRange") |>
+  coverage_plot("m") +
+  labs(y = "Mutants that change this line", x = "Line number")
+) |> pr("cr_lines_mutants")
+
+
+(mutants |>
+  #filter(cut == "ByteVector") |>
+  coverage_plot("m") +
+  labs(y = "Mutants that change this line", x = "Line number")
+  ) |> pr("bv_lines_mutants")
+
+
+
+method_coverage_plot <- function(.data, type) {
+  if (! type %in% c("t", "m")) {
+    stop("type must be t or m")
+  }
+  old_lines <- if (type == "t") "lines_covered" else "mutatedlines"
+  old_id <- if (type == "t") "test_id" else "mutant_id"
+  mapping <- if (.data[1,"cut"] == "ByteVector") ByteVector_mapping else CharRange_mapping
+  
+  .data |>
+    rename(.lines = !!sym(old_lines)) |>
+    rename(.id = !!sym(old_id)) |>
+    select(author_llm_or_human, .lines, .id) |>
+    separate_longer_delim(.lines, delim=",") |>
+    mutate(.lines = mapping(.lines)) |>
+    unique() |>
+    mutate(linecount = 1) |>
+    pivot_wider(
+      names_from = .lines, 
+      values_from = linecount, 
+      names_prefix = "lineno_",
+      values_fill = 0
+    ) |>
+    summarise(across(starts_with("lineno_"), mean), .by = c(
+      "author_llm_or_human"
+    )) |>
+    pivot_longer(
+      cols = starts_with("lineno_"),
+      names_to = "line_number",
+      names_prefix = "lineno_",
+      values_to = "line_mean",
+      names_transform = factor
+    ) |>
+    mutate(
+      author_llm_or_human = paste(author_llm_or_human, if (type == "t") "Defender" else "Attacker")
+      #opponent_llm_or_human = paste(opponent_llm_or_human, if (type == "m") "Defender" else "Attacker")
+    ) |>
+    ggplot(aes(y = line_number, x = line_mean)) +
+    geom_col() +
+    facet_grid( ~ author_llm_or_human) +
+    scale_x_continuous(labels = percent) +
+    theme(axis.text.y = element_text(size = 10))
+}
+
+(
+  (mutants |>
+  filter(cut == "ByteVector") |>
+  method_coverage_plot("m") +
+  labs(title = "ByteVector", x = "Mutants that change this method", y = NULL)) /
+    (mutants |>
+       filter(cut == "CharRange") |>
+       method_coverage_plot("m") +
+       labs(title = "CharRange", x = "Mutants that change this method", y = NULL))
+) |> pr("mutants_bv_methods", height = 8)
+
