@@ -319,6 +319,20 @@ list(
       filter(cut == "ByteVector", author_llm_or_human == "LLM") |>
       summarise(n = n(), .by = mutated_methods) |>
       summarise(gini = Gini(n)))$gini,
+  
+  mutant_methods_gini_cr = mutants |>
+    filter(cut == "CharRange") |>
+    separate_longer_delim(mutated_methods, ",") |>
+    mutate(mutated_methods = factor(mutated_methods)) |>
+    summarise(n = n(), .by = c(author_llm_or_human, game_id, mutated_methods)) |>
+    summarise(gini = fixed_gini(n, length(levels(mutated_methods))), .by = c(author_llm_or_human, game_id)) |>
+    summarise(gini = mean(gini), .by = author_llm_or_human) |>
+    pivot_wider(values_from = gini, names_from = author_llm_or_human),
+  
+  total_llm_mutant_method_gini_cr = (mutants |>
+                                       filter(cut == "CharRange", author_llm_or_human == "LLM") |>
+                                       summarise(n = n(), .by = mutated_methods) |>
+                                       summarise(gini = Gini(n)))$gini,
     
     
     
@@ -1000,3 +1014,64 @@ method_coverage_plot <- function(.data, type) {
        labs(title = "CharRange", x = "Mutants that change this method", y = NULL))
 ) |> pr("mutants_bv_methods", height = 8)
 
+({
+  mutant_methods_gini_bv <- mutants |>
+    filter(cut == "ByteVector") |>
+    separate_longer_delim(mutated_methods, ",") |>
+    mutate(mutated_methods = factor(mutated_methods)) |>
+    summarise(n = n(), .by = c(author_llm_or_human, game_id, mutated_methods)) |>
+    summarise(gini = fixed_gini(n, length(levels(mutated_methods))), .by = c(author_llm_or_human, game_id)) |>
+    summarise(gini = mean(gini), .by = author_llm_or_human) |>
+    pivot_wider(values_from = gini, names_from = author_llm_or_human)
+  
+  total_llm_mutant_method_gini_bv <- (mutants |>
+                                       filter(cut == "ByteVector", author_llm_or_human == "LLM") |>
+                                       summarise(n = n(), .by = mutated_methods) |>
+                                       summarise(gini = Gini(n)))$gini
+  
+  total_human_mutant_method_gini_bv <- (mutants |>
+                                        filter(cut == "ByteVector", author_llm_or_human == "Human") |>
+                                        summarise(n = n(), .by = mutated_methods) |>
+                                        summarise(gini = Gini(n)))$gini
+  
+  mutant_methods_gini_cr <- mutants |>
+    filter(cut == "CharRange") |>
+    separate_longer_delim(mutated_methods, ",") |>
+    mutate(mutated_methods = factor(mutated_methods)) |>
+    summarise(n = n(), .by = c(author_llm_or_human, game_id, mutated_methods)) |>
+    summarise(gini = fixed_gini(n, length(levels(mutated_methods))), .by = c(author_llm_or_human, game_id)) |>
+    summarise(gini = mean(gini), .by = author_llm_or_human) |>
+    pivot_wider(values_from = gini, names_from = author_llm_or_human)
+  
+  total_llm_mutant_method_gini_cr <- (mutants |>
+                                       filter(cut == "CharRange", author_llm_or_human == "LLM") |>
+                                       summarise(n = n(), .by = mutated_methods) |>
+                                       summarise(gini = Gini(n)))$gini
+  
+  total_human_mutant_method_gini_cr <- (mutants |>
+                                        filter(cut == "CharRange", author_llm_or_human == "Human") |>
+                                        summarise(n = n(), .by = mutated_methods) |>
+                                        summarise(gini = Gini(n)))$gini
+  
+  
+  
+  n_mutants_with_multiple_methods <- mutants |> filter(grepl(",", fixed = TRUE, mutated_methods)) |> nrow()
+  
+  data.frame(
+    tmp = c("Avg. per game – Humans", "Avg. per game – LLMs", "Total – Humans", "Total – LLMs"),
+    ByteVector = round(c(
+      mutant_methods_gini_bv$Human,
+      mutant_methods_gini_bv$LLM,
+      total_human_mutant_method_gini_bv,
+      total_llm_mutant_method_gini_bv
+    ), digits = 2),
+    
+    CharRange = round(c(
+      mutant_methods_gini_cr$Human,
+      mutant_methods_gini_cr$LLM,
+      total_human_mutant_method_gini_cr,
+      total_llm_mutant_method_gini_cr
+    ), digits = 2)
+  )
+
+}) |> rename(`Gini Coefficient` = tmp) |> csv("ginis")
