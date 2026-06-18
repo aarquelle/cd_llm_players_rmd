@@ -11,6 +11,7 @@ library(readr)
 library(scales)
 library(patchwork)
 library(ineq)
+library(tibble)
 
 if (FALSE) {
   rm(list = ls())
@@ -31,6 +32,8 @@ add_test_code <- function(df) {
       test_code = substring(test_code, first = regexpr("public void test()", test_code)[1])
     )
 }
+
+
 
 
 pr <- function(plot,
@@ -126,6 +129,19 @@ scale_percentage_bars <- function(dodge_value = 0.9, vjust = -0.2, with.percent 
   )
 }
 
+regression_as_table <- function(model) {
+  coeffs = summary(model)$coefficients
+  coeffs |> 
+    data.frame() |>
+    rename(`Std. Error` = Std..Error, `p-value` = Pr...t..) |>
+    select(!t.value) |>
+    mutate(across(c(Estimate, `Std. Error`), function(x) {round(x, digits = 4)})) |>
+    mutate(`p-value` = sapply(`p-value`, significance_string)) |>
+    rownames_to_column("Coefficient") |>
+    mutate(Coefficient = gsub("`", "", Coefficient, fixed = TRUE))
+    
+}
+
 # Groups by author_llm_or_human and cut, fills to the same as x
 scale_default_grouping <- function(type) {
   if (! type %in% c("t", "m")) {
@@ -166,6 +182,10 @@ typst_defender_mutation_scores <- defender_games |>
     min = min(mutation_score, na.rm = TRUE),
     .by = c(cut, author_llm_or_human)
   )
+
+p.value <- function(s, variable) {
+  s$coefficients[variable, "Pr(>|t|)"]
+}
 
 list(
   #Demographics
@@ -337,7 +357,28 @@ list(
     
     
   n_mutants_with_multiple_methods = mutants |> filter(grepl(",", fixed = TRUE, mutated_methods)) |> nrow(),
-    
+  
+  att_point_ratios_summary= attacker_games |>
+    inner_join(defender_games, join_by(game_id, cut, round), suffix = c(".attacker", ".defender"))|>
+    select(!starts_with("opponent")) |> 
+    filter(author_llm_or_human.defender == "Human") |>
+    mutate(point_ratio = points.attacker / ifelse(points.defender != 0, points.defender, 1)) |> 
+    select(point_ratio, cut, author_llm_or_human.attacker) |>
+    summarise(mean = mean(point_ratio), sd = sd(point_ratio), max = max(point_ratio), min = min(point_ratio), .by = c(cut, author_llm_or_human.attacker)) |>
+    pivot_wider(names_from = c(cut, author_llm_or_human.attacker), values_from = everything()),
+  
+  regression_att_point_author = attacker_games |>
+    inner_join(defender_games, join_by(game_id, cut, round), suffix = c(".attacker", ".defender"))|>
+    select(!starts_with("opponent")) |> 
+    filter(author_llm_or_human.defender == "Human") |>
+    mutate(point_ratio = points.attacker / ifelse(points.defender != 0, points.defender, 1)) |> 
+    select(point_ratio, cut, author_llm_or_human.attacker) %>%
+    lm(data = ., point_ratio ~ author_llm_or_human.attacker + cut) |>
+    summary() |>
+    p.value("author_llm_or_human.attackerHuman"),
+  
+  
+  
   
   #mutation_scores_bv = defender_games |> 
   #  filter(cut == "ByteVector") |>
@@ -740,7 +781,7 @@ significance_string <- function(p) {
   } else {
     ""
   }
-  paste(percent(p, accuracy = 0.0001, drop0trailing = TRUE), s, sep = " ")
+  paste(signif(p, 3), s, sep = " ")
 }
 
 # Creates a df with the estimates and p-values of how each dependent variable
@@ -1075,3 +1116,52 @@ method_coverage_plot <- function(.data, type) {
   )
 
 }) |> rename(`Gini Coefficient` = tmp) |> csv("ginis")
+
+(
+  attacker_games |>
+    inner_join(defender_games, join_by(game_id, cut, round), suffix = c(".attacker", ".defender"))|>
+    select(!starts_with("opponent")) |> 
+    filter(author_llm_or_human.defender == "Human") |>
+    mutate(point_ratio = points.attacker / ifelse(points.defender != 0, points.defender, 1)) |> 
+    select(study, game_id, points.attacker, points.defender, point_ratio, author_llm_or_human.attacker, cut) |>
+    filter(point_ratio < 5) |>
+    ggplot(aes(x = author_llm_or_human.attacker, y = point_ratio)) +
+    geom_boxplot() +
+    #ylab("Defender points / attacker points") +
+    facet_wrap( ~ cut)
+) |> pr("attacker_point_ratios")
+
+(
+  attacker_games |>
+    inner_join(defender_games, join_by(game_id, cut, round), suffix = c(".attacker", ".defender"))|>
+    select(!starts_with("opponent")) |> 
+    filter(author_llm_or_human.defender == "Human") |>
+    mutate(point_ratio = points.attacker / ifelse(points.defender != 0, points.defender, 1)) |> 
+    select(point_ratio, cut, author_llm_or_human.attacker) |>
+    summarise(mean = mean(point_ratio), sd = sd(point_ratio), max = max(point_ratio), min = min(point_ratio), n = n(), .by = c(cut, author_llm_or_human.attacker)) |>
+    mutate(across(c(mean, sd, max, min, n), function(x) {round(x, digits = 2)})) |>
+    rename(sigma = sd, Attacker = author_llm_or_human.attacker, CuT = cut) |>
+    arrange(CuT, sigma)
+    #pivot_wider(names_from = c(cut, author_llm_or_human.attacker), values_from = everything())
+) |> csv("attacker_point_ratios")
+
+(
+  mutants |>
+    mutate(
+      `Minutes since start` = seconds_since_gamestart / 60,
+      `Attacker is LLM` = as.numeric(author_llm_or_human == "LLM"),
+      `Defender is LLM` = as.numeric(opponent_llm_or_human == "LLM"),
+      `CuT is CharRange` = as.numeric(cut == "CharRange")
+    ) %>%
+    #filter(opponent_llm_or_human == "Human") %>%
+    lm(
+      data = ., 
+      is_stillborn ~ 
+        `Minutes since start` +
+        `Attacker is LLM` +
+        `Defender is LLM` +
+        `CuT is CharRange`
+      
+    ) |>
+    regression_as_table()
+) |> csv("regression_mutants_stillborn")
