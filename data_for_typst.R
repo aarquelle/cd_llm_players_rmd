@@ -213,9 +213,9 @@ list(
   demo_ages = questionnaire$age,
   demo_semesters = questionnaire$semester,
   
-  number_llmvsllm_games = mutants |> filter(grepl("l", mutant_id)) |> select(game_id) |> unique() |> nrow(),
-  number_llmvsllm_bytevector_games = mutants |> filter(grepl("l", mutant_id)) |> filter(cut == "ByteVector") |> select(game_id) |> unique() |> nrow(),
-  number_llmvsllm_charrange_games = mutants |> filter(grepl("l", mutant_id)) |> filter(cut == "CharRange") |> select(game_id) |> unique() |> nrow(),
+  number_llmvsllm_games = mutants |> filter(study == "llmvsllm") |> select(game_id) |> unique() |> nrow(),
+  number_llmvsllm_bytevector_games = mutants |> filter(study == "llmvsllm") |> filter(cut == "ByteVector") |> select(game_id) |> unique() |> nrow(),
+  number_llmvsllm_charrange_games = mutants |> filter(study == "llmvsllm") |> filter(cut == "CharRange") |> select(game_id) |> unique() |> nrow(),
   
   loc = n_loc,
   
@@ -1165,3 +1165,36 @@ method_coverage_plot <- function(.data, type) {
     ) |>
     regression_as_table()
 ) |> csv("regression_mutants_stillborn")
+
+(
+  deftests |>
+    filter(author_llm_or_human == "Human") |>
+    separate_longer_delim(lines_covered, ",") |>
+    summarise(
+      .by = c(
+        lines_covered,
+        game_id,
+        cut,
+        opponent_llm_or_human
+      )
+    ) |>
+    left_join(n_loc, join_by(cut)) |>
+    summarise(
+      lines_covered = n(),
+      .by = c(
+        game_id,
+        cut,
+        opponent_llm_or_human,
+        loc_for_cut
+      )
+    ) |>
+    mutate(
+      line_coverage = lines_covered / loc_for_cut,
+      `Attacker is LLM` = as.numeric(opponent_llm_or_human == "LLM"),
+      `CuT is CharRange` = as.numeric(cut == "CharRange")
+    ) %>%
+    lm(
+      data = .,
+      line_coverage ~ `Attacker is LLM` + `CuT is CharRange`
+    ) |> regression_as_table()
+) |> csv("human_line_coverage")
