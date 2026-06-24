@@ -529,7 +529,15 @@ all_messages <- tl(function(study) {
         grepl("It has violated these rules:", content, fixed = TRUE) ~ "Test breaks an unknown rule",
         startsWith(content, "Your test has violated these rules:") ~ "ERROR",
         .default = "ERROR"
-      )
+      ),
+      defend_prompt_type = factor(case_when(
+        message_type != "SYSTEM" | strategy != "TEST_FULL_SUITE_PLUS_DEFAULT" | index_in_conversation != 0 ~ NA,
+        grepl("Write a complete test suite for it.", content) ~ "SUITE",
+        grepl("Your task is to write a single unit test", content) & type == "DEFEND_DEFAULT" ~ "SINGLE",
+        grepl("Your task is to write a single unit test", content) & type == "DEFEND_FOCUS" ~ "FOCUS",
+        type == "DEFEND_ONE_FROM_MANY" ~ "SUITE_REPAIR",
+        .default = "ERROR"
+      ))
     ) |>
     mutate(rejection_reason = factor(rejection_reason)) #|>
     #mutate(
@@ -695,6 +703,7 @@ defender_games <- deftests |>
     round
   ) |>
   summarise(
+    number_of_tests = n(),
     points = sum(points), .groups = "drop"
   ) |> 
   left_join(mutant_scores, join_by(game_id == test_game_id, study == test_study, cut))
@@ -708,11 +717,12 @@ attacker_games <- mutants |>
     round
   ) |>
   summarise(
+    number_of_mutants = n(),
     points = sum(points), .groups = "drop"
   )
 
 all_messages <- all_messages |>
-  inner_join(defender_games, join_by(game_id)) |>
+  inner_join(defender_games, join_by(game_id, study)) |>
   rename_with(.cols = starts_with("author"), \(text) sub("author", "defender", text)) |>
   rename_with(.cols = starts_with("opponent"), \(text) sub("opponent", "attacker", text))
 
@@ -728,7 +738,8 @@ all_conversations <- all_messages |>
     input_tokens = sum(input_tokens),
     output_tokens = sum(output_tokens),
     across(starts_with("rejection_"), sum),
-    .by = c(conversation_id, game_id, strategy, type, user_id, mutant_id, test_id, is_success)
+    defend_prompt_type = first(na.omit(defend_prompt_type)),
+    .by = c(conversation_id, game_id, strategy, type, user_id, mutant_id, test_id, is_success, study)
   )
 
 n_loc <- tests |>

@@ -1304,7 +1304,7 @@ mutants |>
 ```{r}
   
 mutants |>
-  ggplot(aes(x = input_tokens, fill = factor(number_of_messages))) +
+  ggplot(aes(x = input_tokens, fill = ordered(number_of_messages))) +
   geom_histogram(position = "stack", bincount = 20) +
   scale_fill_discrete(name = "Number of messages") +
   facet_wrap( ~ cut) +

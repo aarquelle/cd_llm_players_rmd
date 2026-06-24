@@ -12,6 +12,7 @@ library(scales)
 library(patchwork)
 library(ineq)
 library(tibble)
+library(tidyr)
 
 if (FALSE) {
   rm(list = ls())
@@ -23,7 +24,7 @@ if (FALSE) {
 }
 
 theme_set(theme_light(base_size = 20, base_family = "Libertinus Serif", header_family = "Libertinus Sans"))
-update_geom_defaults("text", list(size = 7, family = "Libertinus Serif"))
+update_geom_defaults("text", list(size = 7, family = "Libertinus Sans"))
 
 add_test_code <- function(df) {
   df |>
@@ -117,14 +118,15 @@ scale_defender <- scale_fill_manual(values = colors.actor, name = "Defender")
 scale_attacker <- scale_fill_manual(values = colors.actor, name = "Attacker")
 scale_cut <- scale_fill_manual(values = colors.cut, name = "Class under Test")
 
-scale_percentage_bars <- function(dodge_value = 0.9, vjust = -0.2, with.percent = TRUE) {
+scale_percentage_bars <- function(dodge_value = 0.9, vjust = -0.2, with.percent = TRUE, text_size = 7) {
   list(
     if (with.percent) scale_y_continuous(labels = percent, expand = expansion(mult = c(0, 0.1))) else scale_y_continuous(expand = expansion(mult = c(0, 0.1))),
     geom_col(position = "dodge"),
     geom_text(
       aes(label = if(with.percent) percent(after_stat(y), accuracy = 0.1) else round(after_stat(y), digits = 2)),
       position = position_dodge(dodge_value), 
-      vjust = vjust
+      vjust = vjust,
+      size = text_size
     )
   )
 }
@@ -377,6 +379,24 @@ list(
     summary() |>
     p.value("author_llm_or_human.attackerHuman"),
   
+  wasted_tokens_mutants = all_conversations |>
+    filter(strategy == "MUTANT_ANNOTATED_SINGLE_METHOD") |>
+    mutate(failed = is.na(mutant_id) & type == "ATTACK_DEPENDENCIES") |>
+    summarise(across(c(input_tokens, output_tokens), sum), .by = failed) |>
+    pivot_wider(names_from = failed, values_from = !failed) |>
+    mutate(
+      input = input_tokens_TRUE / (input_tokens_TRUE + input_tokens_FALSE),
+      output = output_tokens_TRUE / (output_tokens_TRUE + output_tokens_FALSE)
+      ),
+  
+  selection_tokens_mutants = all_conversations |>
+    filter(strategy == "MUTANT_ANNOTATED_SINGLE_METHOD") |>
+    mutate(
+      sinput = ifelse(type == "ATTACK_DEFAULT", input_tokens, 0), 
+      soutput = ifelse(type == "ATTACK_DEFAULT", output_tokens, 0)
+    ) |>
+    summarise(across(c(sinput, soutput, input_tokens, output_tokens), sum)) |>
+    mutate(input = sinput / input_tokens, output = soutput / output_tokens),
   
   
   
@@ -624,14 +644,12 @@ list(
       study, 
       author_llm_or_human,
       opponent_opinion_human_or_ai, 
-      opponent_opinion_challenged, 
       opponent_opinion_judged_original,
       opponent_opinion_judged_programming_skill
     )) |>
     pivot_longer(
       cols = c(
         opponent_opinion_human_or_ai, 
-        opponent_opinion_challenged, 
         opponent_opinion_judged_original, 
         opponent_opinion_judged_programming_skill
         ),
@@ -642,12 +660,10 @@ list(
       question = factor(question,
         levels = c(
           "opponent_opinion_human_or_ai",
-          "opponent_opinion_challenged",
           "opponent_opinion_judged_original",
           "opponent_opinion_judged_programming_skill"
         ), labels = c(
           "Human or AI?",
-          "Challenging?",
           "Resourceful?",
           "Skillful?"
         )
@@ -786,14 +802,19 @@ significance_string <- function(p) {
 
 # Creates a df with the estimates and p-values of how each dependent variable
 # is correlated to the independent variable
-run_regressions <- function(df, independent_var, dependent_vars) {
+run_regressions <- function(df, independent_var, dependent_vars, control_str = "") {
   
   results <- lapply(dependent_vars, function(dep_var) {
     
-    formula <- as.formula(paste(dep_var, "~", independent_var))
+    formula <- as.formula(paste(
+      dep_var, 
+      "~", 
+      independent_var, 
+      control_str))
+    print(formula)
     model   <- lm(formula, data = df)
     coefs   <- summary(model)$coefficients
-    
+    print(summary(model))
     # Extract the row for the independent variable
     data.frame(
       ` ` = dep_var,
@@ -1198,3 +1219,359 @@ method_coverage_plot <- function(.data, type) {
       line_coverage ~ `Attacker is LLM` + `CuT is CharRange`
     ) |> regression_as_table()
 ) |> csv("human_line_coverage")
+
+{
+  suite_stats <- deftests |>
+    filter(author_llm_or_human == "Human") |>
+    separate_longer_delim(lines_covered, ",") |>
+    summarise(
+      .by = c(
+        lines_covered,
+        game_id,
+        cut,
+        opponent_llm_or_human
+      )
+    ) |>
+    left_join(n_loc, join_by(cut)) |>
+    summarise(
+      lines_covered = n(),
+      .by = c(
+        game_id,
+        cut,
+        opponent_llm_or_human,
+        loc_for_cut
+      )
+    ) |>
+    mutate(
+      line_coverage = lines_covered / loc_for_cut,
+      is_llm = as.numeric(opponent_llm_or_human == "LLM")
+    ) |>
+    left_join(defender_games, join_by(game_id, cut)) %>% 
+    run_regressions("is_llm", c("number_of_tests" ,"line_coverage", "mutation_score", "author_opinion_fun", "author_opinion_challenged"), control_str = "+ cut + round")
+  
+  individual_stats <- deftests |>
+    filter(author_llm_or_human == "Human") |>
+    mutate(is_llm = as.numeric(opponent_llm_or_human == "LLM")) |>
+    mutate(number_of_smells = smell_assertion_roulette + smell_unknown_test + smell_eager_test + smell_duplicate_assert + smell_sensitive_equality + smell_redundant_assertion) |>
+    run_regressions("is_llm", c("kill_rate", "human_kill_rate", "llm_kill_rate", "number_of_smells"), control_str = "+ cut + round")
+  
+  suite_stats |> bind_rows(individual_stats) |>
+    rename(Metric = ` `) |>
+    mutate(Metric = replace_values(
+      Metric,
+      "number_of_tests" ~ "Tests per game",
+      "line_coverage" ~ "Line coverage",
+      "mutation_score"  ~ "Mutation score",
+      "kill_rate" ~ "Total kill rate",
+      "human_kill_rate" ~ "Kill rate against human mutants",
+      "llm_kill_rate" ~ "Kill rate against LLM mutants",
+      "number_of_smells"  ~ "Number of test smells",
+      "author_opinion_challenged" ~ "Student felt challenged",
+      "author_opinion_fun" ~ "Student had fun"
+    ))
+} |>  csv("human_def_behaviour_corrs")
+
+{
+  
+  suite_stats <- mutants |>
+    filter(author_llm_or_human == "Human") |>
+    separate_longer_delim(mutated_methods, ",") |>
+    mutate(mutated_methods = factor(mutated_methods)) |>
+    summarise(n = n(), .by = c(opponent_llm_or_human, game_id, mutated_methods, has_been_killed, is_stillborn, author_opinion_fun, author_opinion_challenged, cut, round)) |>
+    summarise(gini = fixed_gini(n, length(levels(mutated_methods))), .by = c(opponent_llm_or_human, game_id, has_been_killed, is_stillborn, author_opinion_fun, author_opinion_challenged, cut, round)) |>
+    summarise(mutants_per_game = n(), across(c(has_been_killed, is_stillborn), mean), .by = c(opponent_llm_or_human, game_id, gini, author_opinion_fun, author_opinion_challenged, cut, round)) |>
+    mutate(is_llm = as.numeric(opponent_llm_or_human == "LLM"), is_equivalent = !has_been_killed) |>
+    run_regressions("is_llm", c("gini", "mutants_per_game", "is_equivalent", "is_stillborn", "author_opinion_fun", "author_opinion_challenged"), control_str = "+ cut + round")
+  
+  individual_stats <- mutants |>
+    filter(author_llm_or_human == "Human") |>
+    mutate(is_llm = as.numeric(opponent_llm_or_human == "LLM")) |>
+    run_regressions("is_llm", c("evasion_rate", "human_evasion_rate", "llm_evasion_rate"), control_str = "+ cut + round")
+  
+  suite_stats |> bind_rows(individual_stats) |>
+    rename(Metric = ` `) |>
+    mutate(Metric = replace_values(
+      Metric,
+      "mutants_per_game" ~ "Mutants per game",
+      "is_equivalent"  ~ "Equivalence rate",
+      "evasion_rate" ~ "Total evasion rate",
+      "human_evasion_rate" ~ "Evasion rate against human tests",
+      "llm_evasion_rate" ~ "Evasion rate against LLM tests",
+      "author_opinion_challenged" ~ "Student felt challenged",
+      "author_opinion_fun" ~ "Student had fun",
+      "gini" ~ "Unevenness of mutated methods",
+      "is_stillborn" ~ "Stillborn rate"
+    ))
+} |>  csv("human_att_behaviour_corrs")
+
+
+(
+  deftests |>
+    filter(opponent_llm_or_human == "Human") |>
+    summarise(.by = c(
+      game_id,
+      study, 
+      author_llm_or_human,
+      opponent_opinion_fun, 
+      opponent_opinion_challenged
+    )) |>
+    pivot_longer(
+      cols = c(
+        opponent_opinion_fun, 
+        opponent_opinion_challenged
+      ),
+      names_to = "question",
+      values_to = "answer"  
+    ) |>
+    mutate(
+      question = factor(question,
+                        levels = c(
+                          "opponent_opinion_challenged",
+                          "opponent_opinion_fun"
+                        ), labels = c(
+                          "Challenging?",
+                          "Fun?"
+                        )
+      ),
+      answer = ordered(answer),
+      author_llm_or_human = factor(author_llm_or_human,
+                                   levels = c("LLM", "Human"),
+                                   labels = c("LLM Defender", "Human Defender")
+      )
+    ) |>
+    summarise(n = n(), .by = c(question, author_llm_or_human, answer)) |>
+    ggplot(aes(y = question, fill = answer, x = n)) +
+    facet_grid(author_llm_or_human ~ .) +
+    geom_col(position = position_stack(reverse = TRUE)) +
+    geom_text(aes(label = n), position = position_stack(0.5, reverse = TRUE)) +
+    labs(y = NULL, x = NULL, fill = "Answer")
+) |> pr("defender_opponent_enjoyment")
+
+defender_games |> 
+  filter(author_llm_or_human == "Human") |>
+  mutate(
+    `Attacker is LLM` = as.numeric(opponent_llm_or_human == "LLM"),
+    `CuT is CharRange` = as.numeric(cut == "CharRange"),
+    `2nd experiment round` = as.numeric(round == "Round 2")
+  )%>% 
+  lm(data = ., author_opinion_fun ~ `Attacker is LLM` + `CuT is CharRange` + `2nd experiment round`) |> 
+  regression_as_table() |> csv("regression_defender_fun")
+
+defender_games |> 
+  filter(author_llm_or_human == "Human") |>
+  mutate(
+    `Attacker is LLM` = as.numeric(opponent_llm_or_human == "LLM"),
+    `CuT is CharRange` = as.numeric(cut == "CharRange"),
+    `2nd experiment round` = as.numeric(round == "Round 2")
+  )%>% 
+  lm(data = ., author_opinion_challenged ~ `Attacker is LLM` + `CuT is CharRange` + `2nd experiment round`) |> 
+  regression_as_table() |> csv("regression_defender_challenge")
+
+{
+  per_submission <- mutants |>
+  filter(author_llm_or_human == "LLM") |>
+  summarise(
+    across(c(input_tokens, output_tokens), mean), 
+    mutants_per_game = n(),
+    .by = c(cut, game_id)
+  )
+  #rename(CuT = cut, `Input tokens` = input_tokens, `Output tokens` = output_tokens) 
+  
+  
+  failing <- all_conversations |>
+    filter(type == "ATTACK_DEPENDENCIES", is.na(mutant_id)) |>
+    summarise(across(c(input_tokens, output_tokens), sum), .by = game_id) |>
+    rename(failing_input = input_tokens, failing_output = output_tokens)
+  
+  selection <- all_conversations |>
+    filter(type == "ATTACK_DEFAULT") |>
+    summarise(across(c(input_tokens, output_tokens), sum), .by = game_id) |>
+    rename(selection_input = input_tokens, selection_output = output_tokens)
+  
+  per_submission |>
+    left_join(failing, join_by(game_id)) |>
+    mutate(
+      failing_input = ifelse(is.na(failing_input), 0, failing_input),
+      failing_output = ifelse(is.na(failing_output), 0, failing_output)
+    ) |>
+    mutate(
+      failing_input = failing_input / mutants_per_game,
+      failing_output = failing_output / mutants_per_game
+    )|>
+    
+    left_join(selection, join_by(game_id)) |>
+    mutate(
+      selection_input = ifelse(is.na(selection_input), 0, selection_input),
+      selection_output = ifelse(is.na(selection_output), 0, selection_output)
+    ) |>
+    mutate(
+      selection_input = selection_input / mutants_per_game,
+      selection_output = selection_output / mutants_per_game
+    )|>
+  
+    rename(
+      success_input  = input_tokens,
+      success_output = output_tokens,
+      failing_input  = failing_input,
+      failing_output = failing_output
+    ) %>%
+    pivot_longer(
+      cols = c(success_input, success_output, failing_input, failing_output, selection_input, selection_output),
+      names_to = c("success_failing_selection", "in_out"),
+      names_sep = "_",
+      values_to = "tokens"
+    ) |> 
+    summarise(tokens = mean(tokens), .by = c(cut, success_failing_selection, in_out)) |>
+    mutate(
+      success_failing_selection = recode_values(success_failing_selection,
+                                                "success" ~ "Success",
+                                                "failing" ~ "Failure",
+                                                "selection" ~ "Method selection"
+                                                )
+    ) |>
+    ggplot(aes(y = tokens, fill = success_failing_selection, x = in_out)) +
+    geom_col(position = "dodge") +
+    facet_wrap(~ cut) +
+    scale_fill_manual(values = c("#aaffff", "#00aaaa", "#007777")) +
+    labs(fill = NULL, x = NULL, y = "Token count") +
+    geom_text(aes(label = round(tokens)), position = position_dodge(width = 0.9), vjust = -0.2) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+  
+} |> pr("mutant_tokens")
+
+{
+  (mutants |>
+    filter(author_llm_or_human == "LLM") |>
+    ggplot(aes(x = input_tokens, fill = factor(number_of_messages))) +
+    geom_histogram(position = "stack", bins = 20, show.legend = FALSE) +
+    facet_wrap(cut ~ ., ncol = 1) +
+    labs(x = "Input tokens")+ theme(axis.text.x = element_text(angle = 45))) +
+  (mutants |>
+    filter(author_llm_or_human == "LLM") |>
+    ggplot(aes(x = output_tokens, fill = factor(number_of_messages))) +
+    geom_histogram(position = "stack", bins = 20) +
+    scale_fill_discrete(name = "Number of\n messages") +
+    facet_wrap(cut ~ ., ncol = 1) +
+    labs(x = "Output tokens", y = NULL)+ theme(axis.text.x = element_text(angle = 45))) 
+} |> pr("mutant_tokens_grouped_by_messages")
+
+{
+  all_messages |>
+    filter(startsWith(as.character(rejection_reason), "Mutant")) |>
+    summarise(n = n(), .by = c(rejection_reason, cut)) |>
+    ggplot(aes(fill = rejection_reason, y = n, x = rejection_reason)) +
+    geom_col(position = "dodge", show.legend = FALSE) +
+    labs(title = "Rejection reasons for attacker tests",
+         x = NULL,#"Conversation is eventually successful",
+         y = "Number of failed attemps",
+         fill = "Rejection reason") +
+    geom_text(aes(label = after_stat(y)), position = position_dodge(0.9), vjust = -0.2) +
+    facet_wrap( ~ cut) +
+    theme(axis.text.x = element_text(angle = 90))
+} |> pr("mutant_rejection_reasons", height = 10)
+
+all_messages |>
+  filter(startsWith(as.character(rejection_reason), "Mutant")) |>
+  summarise(n = n(), .by = c(rejection_reason, cut)) |>
+  mutate(
+    rejection_reason = replace_values
+    (
+      as.character(rejection_reason),
+      "Mutant includes a new system call, or a new control structure" ~ "New system call or control structure",
+      "Mutant already exists" ~ "Already exists",
+      "Mutant has prohibited operations" ~ "Prohibited operations",
+      "Mutant is identical to the CuT" ~ "Identical to CuT",
+      "Mutant has compile error" ~ "Compile error",
+      "Mutant contains new logical operations" ~ "New logical operations"
+    )
+  ) |>
+  pivot_wider(names_from = cut, values_from = n, values_fill = 0) |>
+  rename(`Rejection reason` = rejection_reason) |>
+  csv("mutant_rejection_reasons")
+
+{
+  conversation_count <- all_messages |>
+    filter(user_id == 5, message_type == "AI", type == "ATTACK_DEPENDENCIES") |>
+    summarise(.by = c(conversation_id, study, cut)) |>
+    summarise(total = n(), .by = cut)
+  
+  all_messages |>
+    filter(user_id == 5, message_type == "AI", type == "ATTACK_DEPENDENCIES") |>
+    mutate(success = !is.na(mutant_id)) |> 
+    summarise(number_of_messages = n(), .by = c(success, conversation_id, study, cut)) |>
+    mutate(
+      number_of_failures = ifelse(!success, 4, number_of_messages - 1)
+    ) %>% 
+    summarise(n = n(), .by = c(cut, number_of_failures)) |>
+    left_join(conversation_count, join_by(cut)) |>
+    mutate(m = n/total) |>
+    ggplot(aes(x = number_of_failures, y = m, fill = cut)) +
+    scale_cut +
+    scale_percentage_bars(text_size = 5) +
+    labs(x = "Failures per conversation", y = "Number of conversations")
+} |> pr("mutant_failures_per_conversation")
+
+stepwise_success_rate <- function(msgs){
+  #Success rates for each message count
+  #1: n_0_error / total
+  #2: n_1_error / total - n_0_error
+  #3: n_2_error / total - n_0_error - n_1_error
+  conversation_count <- msgs |>
+    summarise(.by = c(conversation_id, study, cut)) |>
+    summarise(total = n(), .by = cut)
+  
+  counts <- msgs |>
+    mutate(success = !is.na(mutant_id)) |> 
+    summarise(number_of_messages = n(), .by = c(success, conversation_id, study, cut)) |>
+    mutate(
+      number_of_failures = ifelse(!success, 4, number_of_messages - 1)
+    ) %>% 
+    summarise(n = n(), .by = c(cut, number_of_failures)) |>
+    left_join(conversation_count, join_by(cut))
+  
+  result <- data.frame(cut = c(rep("ByteVector", 4), rep("CharRange", 4)), error = rep(0:3, 2))
+  for (cut_l in c("CharRange", "ByteVector")) {
+    total <- (counts|>filter(cut == cut_l))[1, "total"]
+    for (i in 0:3) {
+      succ <- (counts|>filter(cut == cut_l, number_of_failures == i))$n
+      result[result$cut == cut_l & result$error == i, "success_rate"] <- succ / total
+      total <- total - succ
+    }
+  }
+  
+  result |> mutate(error = error + 1)
+  
+}
+
+(all_messages |>
+  filter(user_id == 5, message_type == "AI", type == "ATTACK_DEPENDENCIES") |>
+  stepwise_success_rate() |>
+  ggplot(aes(x = error, y = success_rate, fill = cut)) +
+  scale_percentage_bars(text_size = 6) +
+  scale_cut +
+  labs(x = "Attempt", y = "Success rate")) |>
+  pr("stepwise_mutant_success")
+
+{
+  
+  
+  total_tests <- defender_games |>
+    filter(author_user_id == 6) |>
+    select(game_id, study, number_of_tests, cut) |>
+    mutate(is_success = TRUE)
+
+  tests_per_game <- all_conversations |> 
+    filter(user_id == 6) |>
+    mutate(value = 1) |>
+    pivot_wider(names_from = defend_prompt_type, values_from = value, values_fill = 0) |>
+    summarise(SUITE = sum(SUITE), SUITE_REPAIR = sum(SUITE_REPAIR), FOCUS = sum(FOCUS), SINGLE = sum(SINGLE), .by = c(study, game_id, is_success)) |>
+    left_join(total_tests, join_by(is_success, study, game_id)) |>
+    mutate(suite_tests = number_of_tests - SINGLE - FOCUS - SUITE_REPAIR) |>
+    pivot_longer(cols = c(SUITE, SUITE_REPAIR, FOCUS, SINGLE, number_of_tests, suite_tests), names_to = "test_type", values_to = "count")
+  
+  tests_per_game
+  
+} |> filter(is_success) |>
+  summarise(count = sum(count), .by = test_type) |>
+  ggplot(aes(x = test_type, y = count, fill = cut)) +
+  scale_percentage_bars(with.percent = FALSE)
