@@ -23,7 +23,7 @@ if (FALSE) {
     summarise(n = n(), .by = c(game_id, study, cut, author_llm_or_human, opponent_llm_or_human, test_code))
 }
 
-theme_set(theme_light(base_size = 20, base_family = "Libertinus Serif", header_family = "Libertinus Sans"))
+theme_set(theme_light(base_size = 20, base_family = "Libertinus Serif", header_family = "Libertinus Sans") + theme(legend.position = "bottom"))
 update_geom_defaults("text", list(size = 7, family = "Libertinus Sans"))
 
 add_test_code <- function(df) {
@@ -118,10 +118,10 @@ scale_defender <- scale_fill_manual(values = colors.actor, name = "Defender")
 scale_attacker <- scale_fill_manual(values = colors.actor, name = "Attacker")
 scale_cut <- scale_fill_manual(values = colors.cut, name = "Class under Test")
 
-scale_percentage_bars <- function(dodge_value = 0.9, vjust = -0.2, with.percent = TRUE, text_size = 7) {
+scale_percentage_bars <- function(dodge_value = 0.9, vjust = -0.2, with.percent = TRUE, text_size = 7, show.legend = TRUE) {
   list(
     if (with.percent) scale_y_continuous(labels = percent, expand = expansion(mult = c(0, 0.1))) else scale_y_continuous(expand = expansion(mult = c(0, 0.1))),
-    geom_col(position = "dodge"),
+    geom_col(position = "dodge", show.legend = show.legend),
     geom_text(
       aes(label = if(with.percent) percent(after_stat(y), accuracy = 0.1) else round(after_stat(y), digits = 2)),
       position = position_dodge(dodge_value), 
@@ -157,6 +157,21 @@ scale_default_grouping <- function(type) {
          fill = ifelse(type == "t", "Defender", "Attacker"),)
     
   )
+}
+
+significance_string <- function(p) {
+  s <- if (p < 0.001) {
+    "***"
+  } else if (p < 0.01) {
+    "**"
+  } else if (p < 0.05) {
+    "*"
+  } else if (p < 0.1) {
+    "."
+  } else {
+    ""
+  }
+  paste(signif(p, 3), s, sep = " ")
 }
 
 test_performance_plot <- function(.data, y, title = NULL, ylab = NULL, geom = geom_boxplot(show.legend = FALSE)) {
@@ -398,7 +413,7 @@ list(
     summarise(across(c(sinput, soutput, input_tokens, output_tokens), sum)) |>
     mutate(input = sinput / input_tokens, output = soutput / output_tokens),
   
-  
+  set_for_all_mutants = covering_tests(mutants),
   
   #mutation_scores_bv = defender_games |> 
   #  filter(cut == "ByteVector") |>
@@ -636,6 +651,22 @@ list(
     labs(y = "Defender point ratio", x = "Class under Test")
 ) |> pr("point_ratios")
 
+attacker_games |>
+  inner_join(defender_games, join_by(game_id, cut, round), suffix = c(".attacker", ".defender"))|>
+  select(!starts_with("opponent")) |>
+  filter(author_llm_or_human.attacker == "Human") |>
+  mutate(
+    `Point ratio` = points.defender / ifelse(points.attacker != 0, points.attacker, 1),
+    `Defender is LLM` = as.numeric(author_llm_or_human.defender == "LLM"),
+    `CuT is CharRange` = as.numeric(cut == "CharRange"),
+    `2nd experiment round` = as.numeric(round == "Round 2")
+  
+    )%>% 
+  #run_regressions("is_llm", dependent_vars = c("point_ratio", "Win"), control_str = " + cut + round")
+  lm(data = ., `Point ratio` ~ `Defender is LLM` + `CuT is CharRange` + `2nd experiment round`) |>
+  regression_as_table() |>
+  csv("point_ratios_regression")
+
 (
   deftests |>
     filter(opponent_llm_or_human == "Human") |>
@@ -690,14 +721,12 @@ list(
       study, 
       author_llm_or_human,
       opponent_opinion_human_or_ai, 
-      opponent_opinion_challenged, 
       opponent_opinion_judged_original,
       opponent_opinion_judged_programming_skill
     )) |>
     pivot_longer(
       cols = c(
         opponent_opinion_human_or_ai, 
-        opponent_opinion_challenged, 
         opponent_opinion_judged_original, 
         opponent_opinion_judged_programming_skill
       ),
@@ -708,12 +737,10 @@ list(
       question = factor(question,
                         levels = c(
                           "opponent_opinion_human_or_ai",
-                          "opponent_opinion_challenged",
                           "opponent_opinion_judged_original",
                           "opponent_opinion_judged_programming_skill"
                         ), labels = c(
                           "Human or AI?",
-                          "Challenging?",
                           "Resourceful?",
                           "Skillful?"
                         )
@@ -721,7 +748,7 @@ list(
       answer = ordered(answer),
       author_llm_or_human = factor(author_llm_or_human,
                                    levels = c("LLM", "Human"),
-                                   labels = c("LLM Attacker", "Human Attacker")
+                                   labels = c("LLM Att.", "Human Att.")
       )
     ) |>
     summarise(n = n(), .by = c(question, author_llm_or_human, answer)) |>
@@ -731,6 +758,8 @@ list(
     geom_text(aes(label = n), position = position_stack(0.5, reverse = TRUE)) +
     labs(y = NULL, x = NULL, fill = "Answer")
 ) |> pr("attacker_opponent_opinions")
+
+
 
 
 turing_defender_reasons <- attacker_games |>
@@ -785,20 +814,7 @@ turing_attacker_reasons <- attacker_games |>
 ) |> pr("fresh_kills")
 
 
-significance_string <- function(p) {
-  s <- if (p < 0.001) {
-    "***"
-  } else if (p < 0.01) {
-    "**"
-  } else if (p < 0.05) {
-    "*"
-  } else if (p < 0.1) {
-    "."
-  } else {
-    ""
-  }
-  paste(signif(p, 3), s, sep = " ")
-}
+
 
 # Creates a df with the estimates and p-values of how each dependent variable
 # is correlated to the independent variable
@@ -836,19 +852,16 @@ defender_games |>
   run_regressions("is_human", c(
     "opponent_opinion_judged_programming_skill",
     "opponent_opinion_judged_original",
-    "opponent_opinion_challenged", 
     "opponent_opinion_human_or_ai"
-    )) |>
+    ), control_str = " + cut + round") |>
   mutate(
     ` ` = factor(` `,
                  levels = c(
                    "opponent_opinion_human_or_ai",
-                   "opponent_opinion_challenged",
                    "opponent_opinion_judged_original",
                    "opponent_opinion_judged_programming_skill"
                  ), labels = c(
                    "Human or AI?",
-                   "Challenging?",
                    "Resourceful?",
                    "Skillful?"
                  )
@@ -862,19 +875,16 @@ attacker_games |>
   run_regressions("is_human", c(
     "opponent_opinion_judged_programming_skill",
     "opponent_opinion_judged_original",
-    "opponent_opinion_challenged", 
     "opponent_opinion_human_or_ai"
-  )) |>
+  ), control_str = " + cut + round") |>
   mutate(
     ` ` = factor(` `,
                       levels = c(
                         "opponent_opinion_human_or_ai",
-                        "opponent_opinion_challenged",
                         "opponent_opinion_judged_original",
                         "opponent_opinion_judged_programming_skill"
                       ), labels = c(
                         "Human or AI?",
-                        "Challenging?",
                         "Resourceful?",
                         "Skillful?"
                       )
@@ -964,8 +974,24 @@ mutants |>
     xlab("Attacker") +
     scale_y_continuous(name = "Evasion rate", labels = percent) + 
     scale_fill_manual(name = "Defender", values = colors.actor) +
+    theme(legend.position = "right") +
     facet_wrap( ~ evasion_rate_type)#todo: diamond for means??
 ) |> pr("evasion_rates")
+
+mutants |>
+  filter(has_been_killed) |>
+  mutate(is_llm = as.numeric(author_llm_or_human == "LLM")) |>
+  run_regressions("is_llm", c("evasion_rate", "llm_evasion_rate", "human_evasion_rate", "existing_evasion_rate", "future_evasion_rate"), "+ round + cut + opponent_llm_or_human") |>
+  rename(`Evasion rate type` = ` `) |>
+  mutate(`Evasion rate type` = replace_values(`Evasion rate type`,
+                                              "evasion_rate" ~ "Total evasion rate",
+                                              "llm_evasion_rate" ~ "Against LLM tests",
+                                              "human_evasion_rate" ~ "Against human tests",
+                                              "existing_evasion_rate" ~ "Against existing tests (same game)",
+                                              "future_evasion_rate" ~ "Against future tests (same game)"
+                                              )) |>
+  csv("evasion_rate_regression")
+  
 
 coverage_plot <- function(.data, type) {
   if (! type %in% c("t", "m")) {
@@ -1069,7 +1095,7 @@ method_coverage_plot <- function(.data, type) {
   (mutants |>
   filter(cut == "ByteVector") |>
   method_coverage_plot("m") +
-  labs(title = "ByteVector", x = "Mutants that change this method", y = NULL)) /
+  labs(title = "ByteVector", x = NULL, y = NULL)) /
     (mutants |>
        filter(cut == "CharRange") |>
        method_coverage_plot("m") +
@@ -1347,6 +1373,49 @@ method_coverage_plot <- function(.data, type) {
     labs(y = NULL, x = NULL, fill = "Answer")
 ) |> pr("defender_opponent_enjoyment")
 
+(
+  mutants |>
+    filter(opponent_llm_or_human == "Human") |>
+    summarise(.by = c(
+      game_id,
+      study, 
+      author_llm_or_human,
+      opponent_opinion_fun, 
+      opponent_opinion_challenged
+    )) |>
+    pivot_longer(
+      cols = c(
+        opponent_opinion_fun, 
+        opponent_opinion_challenged
+      ),
+      names_to = "question",
+      values_to = "answer"  
+    ) |>
+    mutate(
+      question = factor(question,
+                        levels = c(
+                          "opponent_opinion_challenged",
+                          "opponent_opinion_fun"
+                        ), labels = c(
+                          "Challenging?",
+                          "Fun?"
+                        )
+      ),
+      answer = ordered(answer),
+      author_llm_or_human = factor(author_llm_or_human,
+                                   levels = c("LLM", "Human"),
+                                   labels = c("LLM Attacker", "Human Attacker")
+      )
+    ) |>
+    summarise(n = n(), .by = c(question, author_llm_or_human, answer)) |>
+    ggplot(aes(y = question, fill = answer, x = n)) +
+    facet_grid(author_llm_or_human ~ .) +
+    geom_col(position = position_stack(reverse = TRUE)) +
+    geom_text(aes(label = n), position = position_stack(0.5, reverse = TRUE)) +
+    labs(y = NULL, x = NULL, fill = "Answer")
+) |> pr("attacker_opponent_enjoyment")
+
+
 defender_games |> 
   filter(author_llm_or_human == "Human") |>
   mutate(
@@ -1521,7 +1590,7 @@ stepwise_success_rate <- function(msgs){
     summarise(total = n(), .by = cut)
   
   counts <- msgs |>
-    mutate(success = !is.na(mutant_id)) |> 
+    mutate(success = is_success) |>#!is.na(test_id)) |> 
     summarise(number_of_messages = n(), .by = c(success, conversation_id, study, cut)) |>
     mutate(
       number_of_failures = ifelse(!success, 4, number_of_messages - 1)
@@ -1557,7 +1626,7 @@ stepwise_success_rate <- function(msgs){
   
   total_tests <- defender_games |>
     filter(author_user_id == 6) |>
-    select(game_id, study, number_of_tests, cut) |>
+    select(game_id, study, number_of_tests, cut, opponent_llm_or_human) |>
     mutate(is_success = TRUE)
 
   tests_per_game <- all_conversations |> 
@@ -1569,9 +1638,152 @@ stepwise_success_rate <- function(msgs){
     mutate(suite_tests = number_of_tests - SINGLE - FOCUS - SUITE_REPAIR) |>
     pivot_longer(cols = c(SUITE, SUITE_REPAIR, FOCUS, SINGLE, number_of_tests, suite_tests), names_to = "test_type", values_to = "count")
   
-  tests_per_game
+  tests_per_game |> 
+    filter(is_success) |>
+    filter(test_type %in% c("FOCUS", "SINGLE", "SUITE_REPAIR", "suite_tests")) |>
+    summarise(count = mean(count), .by = c(test_type, cut, opponent_llm_or_human)) |>
+    mutate(test_type = replace_values(test_type, 
+                                      "FOCUS" ~ "Focused",
+                                      "SINGLE" ~ "Unfocused",
+                                      "SUITE_REPAIR" ~ "Repaired suite test",
+                                      "suite_tests" ~ "Suite tests"
+                                      ),
+           opponent_llm_or_human = paste(opponent_llm_or_human, "Attacker")
+           ) |>
+    ggplot(aes(fill = test_type, y = count, x = cut)) +
+    scale_percentage_bars(with.percent = FALSE, text_size = 5) +
+    labs(fill = "Generation type", x = NULL, y = "Tests per game") +
+    facet_wrap(~ opponent_llm_or_human)
+} |> pr("test_generation_types")
+
+{
   
-} |> filter(is_success) |>
-  summarise(count = sum(count), .by = test_type) |>
-  ggplot(aes(x = test_type, y = count, fill = cut)) +
-  scale_percentage_bars(with.percent = FALSE)
+  
+  total_tests <- defender_games |>
+    filter(author_user_id == 6) |>
+    select(game_id, study, number_of_tests, cut)
+  
+  tests_per_game <- all_conversations |> 
+    filter(user_id == 6, is_success) |>
+    mutate(value = 1) |>
+    pivot_wider(names_from = defend_prompt_type, values_from = value, values_fill = 0) |>
+    summarise(SUITE_REPAIR = sum(SUITE_REPAIR), FOCUS = sum(FOCUS), SINGLE = sum(SINGLE), .by = c(study, game_id)) |>
+    left_join(total_tests, join_by(study, game_id)) |>
+    mutate(suite_tests = number_of_tests - SINGLE - FOCUS - SUITE_REPAIR) |>
+    pivot_longer(cols = c(SUITE_REPAIR, FOCUS, SINGLE, suite_tests), names_to = "test_type", values_to = "count")
+  
+  tokens_per_game <- all_conversations |>
+    filter(user_id == 6) |>
+    summarise(across(c(input_tokens, output_tokens), sum), .by = c(study, game_id, defend_prompt_type))
+  
+  tests_per_game |> 
+    #filter(is_success) |>
+    filter(test_type %in% c("FOCUS", "SINGLE", "SUITE_REPAIR", "suite_tests")) |>
+    mutate(test_type = ifelse(test_type == "suite_tests", "SUITE", test_type)) |>
+    left_join(tokens_per_game, join_by(study, game_id, test_type == defend_prompt_type)) |>
+    mutate(count = ifelse(count == 0, 1, count)) |>
+    mutate(input_tokens = input_tokens / count, output_tokens = output_tokens / count) |>
+    mutate(input_tokens = replace_na(input_tokens, 0), output_tokens = replace_na(output_tokens, 0)) |>
+    summarise(across(c(input_tokens, output_tokens), mean), .by = c(test_type, study)) |>
+    mutate(
+      test_type = replace_values(test_type, 
+                                      "FOCUS" ~ "Focused",
+                                      "SINGLE" ~ "Unfocused",
+                                      "SUITE_REPAIR" ~ "Repaired suite test",
+                                      "SUITE" ~ "Suite tests"
+      ),
+      study = ifelse(study == "userstudy", "Human attacker", "LLM attacker")
+    ) |>
+    ggplot(aes(fill = test_type, y = input_tokens, x = "")) +
+    scale_percentage_bars(with.percent = FALSE, text_size = 5) +
+    labs(fill = "Generation type", x = NULL, y = "Tokens per test") +
+    facet_wrap(~ study)
+} #|> pr("test_tokens_by_type")#BROKEN!!!
+
+{
+  
+  
+  total_tests <- defender_games |>
+    filter(author_user_id == 6) |>
+    summarise(number_of_tests = sum(number_of_tests), .by = cut)
+  
+  tests_per_type <- all_conversations |> 
+    filter(user_id == 6, is_success) |>
+    mutate(value = 1) |>
+    pivot_wider(names_from = defend_prompt_type, values_from = value, values_fill = 0) |>
+    left_join(defender_games, join_by(game_id, study)) |>
+    summarise(SUITE_REPAIR = sum(SUITE_REPAIR), FOCUS = sum(FOCUS), SINGLE = sum(SINGLE), .by = cut) |>
+    left_join(total_tests, join_by(cut)) |>
+    mutate(SUITE = number_of_tests - SINGLE - FOCUS - SUITE_REPAIR) |>
+    pivot_longer(cols = c(SUITE_REPAIR, FOCUS, SINGLE, SUITE), names_to = "defend_prompt_type", values_to = "count")
+  
+  tokens_per_type <- all_conversations |>
+    filter(user_id == 6) |>
+    left_join(defender_games, join_by(game_id, study)) |>
+    summarise(across(c(input_tokens, output_tokens), sum), .by = c(defend_prompt_type, cut))
+  
+  d <- tokens_per_type |>
+    left_join(tests_per_type, join_by(defend_prompt_type, cut)) |>
+    mutate(input_tokens = input_tokens / count, output_tokens = output_tokens / count) |>
+    mutate(
+      defend_prompt_type = replace_values(defend_prompt_type, 
+                                 "FOCUS" ~ "Focused",
+                                 "SINGLE" ~ "Unfocused",
+                                 "SUITE_REPAIR" ~ "Repaired suite test",
+                                 "SUITE" ~ "Suite tests"
+      )
+    ) |>
+    mutate(input_tokens = ifelse(is.infinite(input_tokens), 0, input_tokens))
+    
+    (ggplot(d, aes(fill = defend_prompt_type, y = input_tokens, x = cut)) +
+    scale_percentage_bars(with.percent = FALSE, text_size = 4) +
+    labs(fill = "Generation type", x = NULL, y = "Input") +
+    theme(legend.position = "right")
+    ) /
+    (ggplot(d, aes(fill = defend_prompt_type, y = output_tokens, x = cut)) +
+    scale_percentage_bars(with.percent = FALSE, text_size = 4, show.legend = FALSE) +
+    labs(fill = "Generation type", x = NULL, y = "Output")
+    )
+} |> pr("test_tokens_by_type")
+
+{
+  default_tests <- all_messages |>
+    filter(user_id == 6, message_type == "AI", type %in% c("DEFEND_DEFAULT")) |>
+    stepwise_success_rate() |>
+    mutate(type = "Unfocused")
+  
+  focus_tests <- all_messages |>
+    filter(user_id == 6, message_type == "AI", type %in% c("DEFEND_FOCUS")) |>
+    stepwise_success_rate() |>
+    mutate(type = "Focused")
+  
+  default_tests |>
+    bind_rows(focus_tests) |>
+    ggplot(aes(x = error, y = success_rate, fill = cut)) +
+    scale_percentage_bars(text_size = 4) +
+    scale_cut +
+    facet_wrap( ~ type) +
+    labs(x = "Attempt", y = "Success rate") +
+    theme(legend.position = "bottom")
+  }|>
+  pr("stepwise_test_success")
+
+all_messages |>
+  filter(startsWith(as.character(rejection_reason), "Test")) |>
+  summarise(n = n(), .by = c(rejection_reason, cut)) |>
+  mutate(
+    rejection_reason = replace_values
+    (
+      as.character(rejection_reason),
+      "Test does not compile" ~ "Does not compile",
+      "Test fails on original" ~ "Fails on original",
+      "Test has a prohibited call" ~ "Prohibited call",
+      "Test includes an invalid statement" ~ "Invalid statement",
+      "Test has too many assertions" ~ "Too many assertions",
+      "Tests breaks an unknown rule" ~ "Bitwise operations",
+      "Test declares additional classes or methods" ~ "Adds additional classes or methods"
+    )
+  ) |>
+  pivot_wider(names_from = cut, values_from = n, values_fill = 0) |>
+  rename(`Rejection reason` = rejection_reason) |>
+  csv("test_rejection_reasons")

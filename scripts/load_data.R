@@ -691,7 +691,33 @@ mutant_scores <- full_map |>
 #mutants <- tmp$mutants
 #rm(tmp)
 
-
+# Greedy algorithm minimum set
+covering_tests <- function(to_cover, potential_killings = full_map) {
+  to_cover <- to_cover |> filter(has_been_killed)
+  potential_killings <- potential_killings |>
+    filter(mutant_id %in% to_cover$mutant_id, state == "KILLED")
+  
+  count <- 0
+  while (nrow(to_cover) > 0) {
+    killer <- potential_killings |>
+      summarise(n = n(), .by = test_id) |>
+      slice_max(n, n = 1, with_ties = FALSE)
+    
+    killed <- potential_killings |>
+      filter(test_id == killer$test_id)
+    
+    potential_killings <- potential_killings |>
+      filter(!(mutant_id %in% killed$mutant_id))
+    
+    to_cover <- to_cover |>
+      filter(!(mutant_id %in% killed$mutant_id))
+    
+    #print(paste(c(killer$test_id, "has killed", killed$mutant_id), collapse = " "))
+    count <- count + 1
+  }
+  return(count)
+}
+  
 
 defender_games <- deftests |>
   group_by(
@@ -719,7 +745,10 @@ attacker_games <- mutants |>
   summarise(
     number_of_mutants = n(),
     points = sum(points), .groups = "drop"
-  )
+  ) |>
+  mutate(killing_test_set = sapply(game_id, function(id){
+    covering_tests(mutants |> filter(game_id == id))
+  }))
 
 all_messages <- all_messages |>
   inner_join(defender_games, join_by(game_id, study)) |>
@@ -747,6 +776,7 @@ n_loc <- tests |>
   separate_longer_delim(lines_covered, ",") |>
   unique() |>
   summarise(loc_for_cut = n(), .by = cut)
+
 
 
 
