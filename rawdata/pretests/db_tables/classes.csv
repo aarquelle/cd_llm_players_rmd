@@ -1,0 +1,12 @@
+Class_ID,Name,JavaFile,ClassFile,Alias,AiPrepared,RequireMocking,Puzzle,Active,TestingFramework,AssertionLibrary,Parent_Class
+236,Lift,sources/Lift/classes/Lift.java,sources/Lift/classes/Lift.class,Lift,0,0,0,1,JUNIT4,JUNIT4_HAMCREST,
+237,CaseInsensitiveString,sources/CaseInsensitiveString/classes/CaseInsensitiveString.java,sources/CaseInsensitiveString/classes/CaseInsensitiveString.class,CaseInsensitiveString,0,0,0,1,JUNIT4,JUNIT4_HAMCREST,
+238,Complex,sources/Complex/classes/Complex.java,sources/Complex/classes/Complex.class,Complex,0,0,0,1,JUNIT4,JUNIT4_HAMCREST,
+239,IntHashMap,sources/IntHashMap/classes/IntHashMap.java,sources/IntHashMap/classes/IntHashMap.class,IntHashMap,0,0,0,1,JUNIT4,JUNIT4_HAMCREST,
+240,Option,sources/Option/classes/Option.java,sources/Option/classes/Option.class,Option,0,0,0,1,JUNIT4,JUNIT4_HAMCREST,
+241,CTEs,sources/CTEs/classes/CTEs.java,sources/CTEs/classes/CTEs.class,CTEs,0,0,0,1,JUNIT4,JUNIT4_HAMCREST,
+242,CharRange,sources/CharRange/classes/CharRange.java,sources/CharRange/classes/CharRange.class,CharRange,0,0,0,1,JUNIT4,JUNIT4_HAMCREST,
+243,ByteVector,sources/ByteVector/classes/ByteVector.java,sources/ByteVector/classes/ByteVector.class,ByteVector,0,0,0,1,JUNIT4,JUNIT4_HAMCREST,
+244,Lift,sources/Lift5/classes/Lift.java,sources/Lift5/classes/Lift.class,Lift5,0,0,0,1,JUNIT4,JUNIT5,
+245,Lift,sources/LiftOnly4/classes/Lift.java,sources/LiftOnly4/classes/Lift.class,LiftOnly4,0,0,0,1,JUNIT4,JUNIT4,
+246,Lift,sources/LiftNewCompiled/classes/Lift.java,sources/LiftNewCompiled/classes/Lift.class,LiftNewCompiled,0,0,0,1,JUNIT4,JUNIT4_HAMCREST,

@@ -17,6 +17,7 @@ library(tidyr)
 if (FALSE) {
   rm(list = ls())
   source("scripts/load_data.R")
+  source("scripts/load_pretests.R")
   dedup_tests_per_game <-  deftests |>
     select(game_id, study, cut, author_llm_or_human, opponent_llm_or_human, test_file) |>
     mutate(test_code = sapply(paste("rawdata/", study, "/datadir/", test_file, sep = ""), \(f) paste(read_lines(f), collapse = "\n"))) |>
@@ -34,6 +35,11 @@ add_test_code <- function(df) {
     )
 }
 
+.simpleCap <- function(x) {
+  s <- strsplit(x, " ")[[1]]
+  paste(toupper(substring(s, 1, 1)), substring(s, 2),
+        sep = "", collapse = " ")
+}
 
 
 
@@ -413,7 +419,11 @@ list(
     summarise(across(c(sinput, soutput, input_tokens, output_tokens), sum)) |>
     mutate(input = sinput / input_tokens, output = soutput / output_tokens),
   
-  set_for_all_mutants = covering_tests(mutants),
+  set_for_all_mutants = list(CharRange = covering_tests(mutants |> filter(cut == "CharRange")), ByteVector = covering_tests(mutants |> filter(cut == "ByteVector"))),
+  
+  average_sets = attacker_games |> 
+    summarise(across(killing_test_set, mean), .by = c(cut)) |>
+    pivot_wider(names_from = cut, values_from = killing_test_set),
   
   #mutation_scores_bv = defender_games |> 
   #  filter(cut == "ByteVector") |>
@@ -1307,7 +1317,8 @@ method_coverage_plot <- function(.data, type) {
     summarise(gini = fixed_gini(n, length(levels(mutated_methods))), .by = c(opponent_llm_or_human, game_id, has_been_killed, is_stillborn, author_opinion_fun, author_opinion_challenged, cut, round)) |>
     summarise(mutants_per_game = n(), across(c(has_been_killed, is_stillborn), mean), .by = c(opponent_llm_or_human, game_id, gini, author_opinion_fun, author_opinion_challenged, cut, round)) |>
     mutate(is_llm = as.numeric(opponent_llm_or_human == "LLM"), is_equivalent = !has_been_killed) |>
-    run_regressions("is_llm", c("gini", "mutants_per_game", "is_equivalent", "is_stillborn", "author_opinion_fun", "author_opinion_challenged"), control_str = "+ cut + round")
+    left_join(attacker_games |> select(game_id, killing_test_set), join_by(game_id)) |>
+    run_regressions("is_llm", c("gini", "mutants_per_game", "is_equivalent", "is_stillborn", "author_opinion_fun", "author_opinion_challenged", "killing_test_set"), control_str = "+ cut + round")
   
   individual_stats <- mutants |>
     filter(author_llm_or_human == "Human") |>
@@ -1326,7 +1337,8 @@ method_coverage_plot <- function(.data, type) {
       "author_opinion_challenged" ~ "Student felt challenged",
       "author_opinion_fun" ~ "Student had fun",
       "gini" ~ "Unevenness of mutated methods",
-      "is_stillborn" ~ "Stillborn rate"
+      "is_stillborn" ~ "Stillborn rate",
+      "killing_test_set" ~ "Minimum set size"
     ))
 } |>  csv("human_att_behaviour_corrs")
 
@@ -1787,3 +1799,78 @@ all_messages |>
   pivot_wider(names_from = cut, values_from = n, values_fill = 0) |>
   rename(`Rejection reason` = rejection_reason) |>
   csv("test_rejection_reasons")
+
+attacker_games |>
+  ggplot(aes(y = killing_test_set, x = author_llm_or_human, fill = cut)) +
+  geom_boxplot()
+
+attacker_games |>
+  mutate(`Attacker is LLM` = as.numeric(author_llm_or_human == "LLM"),
+         `Defender is LLM` = as.numeric(opponent_llm_or_human == "LLM"),
+         `CuT is CharRange` = as.numeric(cut == "CharRange")
+         ) %>% 
+  lm(data = ., killing_test_set ~ `Attacker is LLM` + `Defender is LLM` + `CuT is CharRange`) |>
+  regression_as_table() |>
+  csv("test_set_regression")
+
+pt_conversation_stats |>
+  filter(experiment_name == "Pretest", startsWith(strategy, "MUTANT")) |>
+  arrange(-point_ratio) |>
+  select(strategy, is_success, point_ratio, input_tokens, output_tokens) |>
+  mutate(
+    strategy = strategy %>% gsub("MUTANT", "", .) %>% gsub("_", " ", .) %>% tolower() %>% sapply(.simpleCap),
+    point_ratio = round(point_ratio, digits = 3),
+    is_success = percent(is_success, accuracy = 0.01),
+    input_tokens = round(input_tokens / 30),
+    output_tokens = round(output_tokens / 30)
+  ) |>
+  rename(Strategy = strategy, `Success rate` = is_success, `Point ratio` = point_ratio, `Input tokens` = input_tokens, `Output tokens` = output_tokens) |>
+  relocate(`Strategy`, `Point ratio`) |>
+  csv("pretest_1_mutants")
+
+
+pt_conversation_stats |>
+  filter(experiment_name == "narrow_further_down", startsWith(strategy, "MUTANT")) |>
+  arrange(-point_ratio) |>
+  select(strategy, is_success, point_ratio, input_tokens, output_tokens) |>
+  mutate(
+    strategy = strategy %>% gsub("MUTANT", "", .) %>% gsub("_", " ", .) %>% tolower() %>% sapply(.simpleCap),
+    point_ratio = round(point_ratio, digits = 3),
+    is_success = percent(is_success, accuracy = 0.01),
+    input_tokens = round(input_tokens / 210),
+    output_tokens = round(output_tokens / 210)
+  ) |>
+  rename(Strategy = strategy, `Success rate` = is_success, `Point ratio` = point_ratio, `Input tokens` = input_tokens, `Output tokens` = output_tokens) |>
+  relocate(`Strategy`, `Point ratio`) |>
+  csv("pretest_2_mutants")
+
+pt_conversation_stats |>
+  filter(experiment_name == "Pretest", startsWith(strategy, "TEST")) |>
+  arrange(-point_ratio) |>
+  select(strategy, is_success, point_ratio, input_tokens, output_tokens) |>
+  mutate(
+    strategy = strategy %>% gsub("TEST", "", .) %>% gsub("_", " ", .) %>% tolower() %>% sapply(.simpleCap),
+    point_ratio = round(point_ratio, digits = 3),
+    is_success = percent(is_success, accuracy = 0.01),
+    input_tokens = round(input_tokens / 30),
+    output_tokens = round(output_tokens / 30)
+  ) |>
+  rename(Strategy = strategy, `Success rate` = is_success, `Point ratio` = point_ratio, `Input tokens` = input_tokens, `Output tokens` = output_tokens) |>
+  relocate(`Strategy`, `Point ratio`) |>
+  csv("pretest_1_tests")
+
+
+pt_conversation_stats |>
+  filter(experiment_name == "narrow_further_down", startsWith(strategy, "TEST")) |>
+  arrange(-point_ratio) |>
+  select(strategy, is_success, point_ratio, input_tokens, output_tokens) |>
+  mutate(
+    strategy = strategy %>% gsub("TEST", "", .) %>% gsub("_", " ", .) %>% tolower() %>% sapply(.simpleCap),
+    point_ratio = round(point_ratio, digits = 3),
+    is_success = percent(is_success, accuracy = 0.01),
+    input_tokens = round(input_tokens / 42),
+    output_tokens = round(output_tokens / 42)
+  ) |>
+  rename(Strategy = strategy, `Success rate` = is_success, `Point ratio` = point_ratio, `Input tokens` = input_tokens, `Output tokens` = output_tokens) |>
+  relocate(`Strategy`, `Point ratio`) |>
+  csv("pretest_2_tests")

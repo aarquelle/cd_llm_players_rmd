@@ -682,35 +682,29 @@ mutant_scores <- full_map |>
   mutate(mutation_score = unique_mutants_killed / number_of_mutants_in_cut)
 
 
-# Killmaps data for tests contains 2 rows with NAs: One test has no coverage and
-#therefore no killed/ignored mutants, these values should be changed to 0.
-# The very first test doesn't show up in the dedup data. I will have to figure
-#out why that is. Until then, they remain as NA.
-#tmp <- killmap_data(tests = filter(all_tests, is_compiled), mutants = filter(all_mutants, is_compiled))
-#tests <- tmp$tests
-#mutants <- tmp$mutants
-#rm(tmp)
 
 # Greedy algorithm minimum set
 covering_tests <- function(to_cover, potential_killings = full_map) {
   to_cover <- to_cover |> filter(has_been_killed)
   potential_killings <- potential_killings |>
-    filter(mutant_id %in% to_cover$mutant_id, state == "KILLED")
+    filter(state == "KILLED") |>
+    semi_join(to_cover, join_by(mutant_id, mutant_study == study))
+    #filter(mutant_id %in% to_cover$mutant_id, state == "KILLED")
   
   count <- 0
   while (nrow(to_cover) > 0) {
     killer <- potential_killings |>
-      summarise(n = n(), .by = test_id) |>
+      summarise(n = n(), .by = c(test_id, test_study)) |>
       slice_max(n, n = 1, with_ties = FALSE)
     
     killed <- potential_killings |>
-      filter(test_id == killer$test_id)
+      filter(test_id == killer$test_id, test_study == killer$test_study)
     
     potential_killings <- potential_killings |>
-      filter(!(mutant_id %in% killed$mutant_id))
+      anti_join(killed, join_by(mutant_id, mutant_study))#!(mutant_id %in% killed$mutant_id))
     
     to_cover <- to_cover |>
-      filter(!(mutant_id %in% killed$mutant_id))
+      anti_join(killed, join_by(mutant_id, study == mutant_study))
     
     #print(paste(c(killer$test_id, "has killed", killed$mutant_id), collapse = " "))
     count <- count + 1
@@ -757,6 +751,7 @@ all_messages <- all_messages |>
 
 all_conversations <- all_messages |>
   mutate(value = 1) |>
+  mutate(rejection_reason = ifelse(is.na(rejection_reason), "none", rejection_reason)) |>
   pivot_wider(
     names_from = rejection_reason,
     values_from = value,
@@ -766,8 +761,8 @@ all_conversations <- all_messages |>
   summarise(
     input_tokens = sum(input_tokens),
     output_tokens = sum(output_tokens),
-    across(starts_with("rejection_"), sum),
-    defend_prompt_type = first(na.omit(defend_prompt_type)),
+    across(starts_with("rejection_"), \(x) sum(x, na.rm = TRUE)),
+    defend_prompt_type = first(na.omit(defend_prompt_type)) |> (\(x) if(length(x) == 0) NA_character_ else x)(),
     .by = c(conversation_id, game_id, strategy, type, user_id, mutant_id, test_id, is_success, study)
   )
 
