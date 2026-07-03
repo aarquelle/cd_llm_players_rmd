@@ -1,12 +1,9 @@
 rm(list = ls())
 #install.packages("filecacher")
+#install.packages("tidyverse")
 
-library(dplyr)
-library(stringr)
-library(tidyr)
+library(tidyverse)
 library(filecacher)
-library(stringr)
-library(purrr)
 
 experience_levels <- c("< 3 Monate", 
                        ">= 3 Monate && < 6 Monate", 

@@ -1,18 +1,13 @@
 #install.packages("svglite")
 #install.packages("readr")
 #install.packages("ineq")
+#install.packages("tidyverse")
+library(tidyverse)
 library(jsonlite)
-library(ggplot2)
 library(svglite)
-library(data.table)
-library(dplyr)
-library(glue)
-library(readr)
 library(scales)
 library(patchwork)
 library(ineq)
-library(tibble)
-library(tidyr)
 
 if (FALSE) {
   rm(list = ls())
@@ -260,12 +255,11 @@ list(
   llm_assertion_roulette = mean((deftests |> filter(author_llm_or_human == "LLM"))[, "smell_assertion_roulette"]),
   human_assertion_roulette = mean((deftests |> filter(author_llm_or_human == "Human"))[, "smell_assertion_roulette"]),
   
-  sensitive_equality_example = deftests |> 
+  sensitive_equality_example = (deftests |> 
       filter(author_llm_or_human == "LLM", smell_sensitive_equality, !smell_eager_test, cut == "CharRange") |> 
       head(1) |>
       add_test_code() |>
-      select(test_code) |>
-      rename(typst_code = test_code),
+      select(test_code))$test_code,
   
   winrates_against_humans = attacker_games |>
     inner_join(defender_games, join_by(game_id, cut, round), suffix = c(".attacker", ".defender"))|>
@@ -425,6 +419,14 @@ list(
     summarise(across(killing_test_set, mean), .by = c(cut)) |>
     pivot_wider(names_from = cut, values_from = killing_test_set),
   
+  shortest_test_error = (all_messages |>
+    filter(message_type == "SYSTEM", index_in_conversation == 3, strategy == "TEST_FULL_SUITE_PLUS_DEFAULT") |> 
+    select(content) |>
+    mutate(content_size = nchar(content)) |>
+    slice_min(content_size, n = 1))$content,
+    
+    
+  
   #mutation_scores_bv = defender_games |> 
   #  filter(cut == "ByteVector") |>
   #  summarise(
@@ -469,15 +471,16 @@ list(
     summarise(n = n(), .by = c(xp_type, xp_value)) |>
     
     ggplot(aes(
-      x = xp_type, y = n, fill = xp_value
+      y = xp_type, x = n, fill = xp_value
     )) +
     geom_col(position = "stack") +
-    geom_text(aes(label = after_stat(y)), position = position_stack(vjust = 0.5)) +
+    geom_text(aes(label = after_stat(x)), position = position_stack(vjust = 0.5)) +
     labs(
       fill = "Experience",
-      x = NULL,
-      y = "Count"
-    )
+      y = NULL,
+      x = "Count"
+    ) +
+    theme(legend.position = "right")
 ) |>
   pr("xp")
 
