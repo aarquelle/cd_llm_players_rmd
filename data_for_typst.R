@@ -19,8 +19,9 @@ if (FALSE) {
     summarise(n = n(), .by = c(game_id, study, cut, author_llm_or_human, opponent_llm_or_human, test_code))
 }
 
-theme_set(theme_light(base_size = 20, base_family = "Libertinus Serif", header_family = "Libertinus Sans") + theme(legend.position = "bottom"))
+theme_set(theme_light(base_size = 20, base_family = "Libertinus Serif", header_family = "Libertinus Sans") + theme(legend.position = "bottom", ))
 update_geom_defaults("text", list(size = 7, family = "Libertinus Sans"))
+options(ggplot2.ordinal.fill = function(...) scale_fill_viridis_d(..., option = "viridis", begin = 0.4, end = 1))
 
 add_test_code <- function(df) {
   df |>
@@ -235,6 +236,8 @@ list(
   number_llmvsllm_bytevector_games = mutants |> filter(study == "llmvsllm") |> filter(cut == "ByteVector") |> select(game_id) |> unique() |> nrow(),
   number_llmvsllm_charrange_games = mutants |> filter(study == "llmvsllm") |> filter(cut == "CharRange") |> select(game_id) |> unique() |> nrow(),
   
+  total_tests = total_tests |> pivot_wider(names_from = cut, values_from = number_of_tests),
+  
   loc = n_loc,
   
   def_mutation_score_llm_bv = typst_defender_mutation_scores |> filter(author_llm_or_human == "LLM", cut == "ByteVector"),
@@ -332,11 +335,11 @@ list(
     pivot_wider(names_from = opponent_llm_or_human, values_from = kbe),
   
   p_opponent_equivalent = (lm(
-    !has_been_killed ~
+    eq ~
       author_llm_or_human +
       cut +
       opponent_llm_or_human
-    , data = mutants
+    , data = mutants |> summarise(.by = c(author_llm_or_human, cut, opponent_llm_or_human), eq = mean(!has_been_killed))
   ) |> summary())$coefficients["opponent_llm_or_humanHuman", "Pr(>|t|)"],
   
   n_mutated_lines = mutants |>
@@ -424,6 +427,17 @@ list(
     select(content) |>
     mutate(content_size = nchar(content)) |>
     slice_min(content_size, n = 1))$content,
+  
+  average_defender_costs = all_conversations |>
+    filter(strategy == "TEST_FULL_SUITE_PLUS_DEFAULT") |>
+    summarise(.by = c(game_id, study), across(c(input_tokens, output_tokens), mean)) |>
+    summarise(across(c(input_tokens, output_tokens), mean)),
+  
+  average_attacker_costs = all_conversations |>
+    filter(strategy == "MUTANT_ANNOTATED_SINGLE_METHOD") |>
+    summarise(.by = c(game_id, study), across(c(input_tokens, output_tokens), mean)) |>
+    summarise(across(c(input_tokens, output_tokens), mean)),
+    
     
     
   
@@ -994,6 +1008,7 @@ mutants |>
 mutants |>
   filter(has_been_killed) |>
   mutate(is_llm = as.numeric(author_llm_or_human == "LLM")) |>
+  summarise(.by = c(is_llm, game_id, round, cut, opponent_llm_or_human), across(ends_with("evasion_rate"), mean)) |>
   run_regressions("is_llm", c("evasion_rate", "llm_evasion_rate", "human_evasion_rate", "existing_evasion_rate", "future_evasion_rate"), "+ round + cut + opponent_llm_or_human") |>
   rename(`Evasion rate type` = ` `) |>
   mutate(`Evasion rate type` = replace_values(`Evasion rate type`,
@@ -1292,6 +1307,7 @@ method_coverage_plot <- function(.data, type) {
     filter(author_llm_or_human == "Human") |>
     mutate(is_llm = as.numeric(opponent_llm_or_human == "LLM")) |>
     mutate(number_of_smells = smell_assertion_roulette + smell_unknown_test + smell_eager_test + smell_duplicate_assert + smell_sensitive_equality + smell_redundant_assertion) |>
+    summarise(.by = c(game_id, cut, round, is_llm), across(c(kill_rate, human_kill_rate, llm_kill_rate, number_of_smells), mean)) |>
     run_regressions("is_llm", c("kill_rate", "human_kill_rate", "llm_kill_rate", "number_of_smells"), control_str = "+ cut + round")
   
   suite_stats |> bind_rows(individual_stats) |>
@@ -1326,6 +1342,7 @@ method_coverage_plot <- function(.data, type) {
   individual_stats <- mutants |>
     filter(author_llm_or_human == "Human") |>
     mutate(is_llm = as.numeric(opponent_llm_or_human == "LLM")) |>
+    summarise(.by = c(is_llm, cut, round, game_id), across(c(evasion_rate, human_evasion_rate, llm_evasion_rate), mean)) |>
     run_regressions("is_llm", c("evasion_rate", "human_evasion_rate", "llm_evasion_rate"), control_str = "+ cut + round")
   
   suite_stats |> bind_rows(individual_stats) |>
