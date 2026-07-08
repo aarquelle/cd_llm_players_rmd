@@ -1,0 +1,6 @@
+"Coefficient","Estimate","Std. Error","p-value"
+"(Intercept)",-0.2045,0.0186,"1.45e-27 ***"
+"Minutes since start",0.0198,8e-04,"5.55e-124 ***"
+"Attacker is LLM",0.1303,0.0163,"2.01e-15 ***"
+"Defender is LLM",0.472,0.016,"2.13e-171 ***"
+"CuT is CharRange",0.0089,0.0137,"0.517 "

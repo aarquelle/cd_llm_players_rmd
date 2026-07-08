@@ -1,0 +1,7 @@
+"Smell type","LLM (ByteVector)","Human (ByteVector)","LLM (CharRange)","Human (CharRange)"
+"Assertion roulette","96.32%","34.93%","93.69%","33.33%"
+"Unknown test","0%","0%","0.09%","0%"
+"Eager test","0%","1.37%","26.68%","6.15%"
+"Sensitive equality","0.08%","0%","31.8%","8.21%"
+"Redundant assertion","0%","0%","2.3%","1.03%"
+"Duplicate assertion","0.38%","0%","1.02%","0.51%"

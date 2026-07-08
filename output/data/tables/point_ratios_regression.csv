@@ -1,0 +1,5 @@
+"Coefficient","Estimate","Std. Error","p-value"
+"(Intercept)",0.437,0.1804,"0.025 *"
+"Defender is LLM",0.3226,0.1711,"0.0741 ."
+"CuT is CharRange",0.5855,0.1711,"0.00271 **"
+"2nd experiment round",-0.1968,0.1613,"0.237 "

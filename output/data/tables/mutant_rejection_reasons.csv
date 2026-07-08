@@ -1,0 +1,7 @@
+"Rejection reason","CharRange","ByteVector"
+"Already exists",1087,530
+"Prohibited operations",12,128
+"Identical to CuT",0,29
+"Compile error",16,1
+"New logical operations",1,1
+"New system call or control structure",0,5

@@ -1,0 +1,6 @@
+"Strategy","Point ratio","Success rate","Input tokens","Output tokens"
+" Annotated Single Method",1.948,"80.31%",148004,17340
+" Random Single Method",0.467,"78.81%",69883,6924
+" Default",0.299,"50.10%",204361,62685
+" Annotated Full Class",0.237,"43.94%",356586,54886
+" Default Without Existing",0.111,"35.70%",202568,80701

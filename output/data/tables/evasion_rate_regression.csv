@@ -1,0 +1,6 @@
+"Evasion rate type","Estimate","Std. Error","p-value"
+"Total evasion rate",-0.001,0.0297,"0.972 "
+"Against LLM tests",-0.0067,0.0308,"0.829 "
+"Against human tests",0.0992,0.0332,"0.00377 **"
+"Against existing tests (same game)",0.1236,0.0554,"0.0284 *"
+"Against future tests (same game)",0.2516,0.0597,"6.61e-05 ***"

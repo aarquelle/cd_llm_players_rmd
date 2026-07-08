@@ -1,0 +1,8 @@
+"Rejection reason","CharRange","ByteVector"
+"Does not compile",96,177
+"Fails on original",99,91
+"Prohibited call",3,126
+"Invalid statement",298,118
+"Too many assertions",19,1
+"Bitwise operations",15,1
+"Adds additional classes or methods",2,0

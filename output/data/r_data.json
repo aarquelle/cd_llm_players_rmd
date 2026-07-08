@@ -1,0 +1,227 @@
+{
+  "number_participants": [24],
+  "demo_gender": [
+    {
+      "male": 17,
+      "female": 6,
+      "nonbinary": 1
+    }
+  ],
+  "demo_degree": [
+    {
+      "Internet Computing": 7,
+      "Computer Science": 13,
+      "Computer Science for a teaching post": 3,
+      "Artificial Intelligence": 1
+    }
+  ],
+  "demo_ages": [22, 20, 23, 24, 23, 29, 21, 22, 57, 22, 20, 20, 24, 22, 22, 20, 20, 26, 21, 22, 23, 21, 20, 24],
+  "demo_semesters": [6, 4, 7, 2, 5, 7, 4, 6, 3, 6, 3, 2, 5, 7, 6, 5, 5, 5, 6, 5, 6, 5, 2, 1],
+  "number_llmvsllm_games": [50],
+  "number_llmvsllm_bytevector_games": [25],
+  "number_llmvsllm_charrange_games": [25],
+  "total_tests": [
+    {
+      "CharRange": 1465,
+      "ByteVector": 1681
+    }
+  ],
+  "loc": [
+    {
+      "cut": "CharRange",
+      "loc_for_cut": 67
+    },
+    {
+      "cut": "ByteVector",
+      "loc_for_cut": 150
+    }
+  ],
+  "def_mutation_score_llm_bv": [
+    {
+      "cut": "ByteVector",
+      "author_llm_or_human": "LLM",
+      "mean": 0.836,
+      "max": 0.8964,
+      "min": 0.6126
+    }
+  ],
+  "def_mutation_score_human_bv": [
+    {
+      "cut": "ByteVector",
+      "author_llm_or_human": "Human",
+      "mean": 0.2855,
+      "max": 0.7467,
+      "min": 0.0144
+    }
+  ],
+  "def_mutation_score_llm_cr": [
+    {
+      "cut": "CharRange",
+      "author_llm_or_human": "LLM",
+      "mean": 0.9359,
+      "max": 0.9686,
+      "min": 0.8591
+    }
+  ],
+  "def_mutation_score_human_cr": [
+    {
+      "cut": "CharRange",
+      "author_llm_or_human": "Human",
+      "mean": 0.6427,
+      "max": 0.9512,
+      "min": 0.151
+    }
+  ],
+  "test_point_mean_llm": [1.6649],
+  "test_point_mean_human": [3.7507],
+  "test_point_median_llm": [0],
+  "test_point_median_human": [0],
+  "test_point_75q_llm": [1],
+  "test_point_75q_human": [4],
+  "kill_rate_llm": [0.5196],
+  "kill_rate_human": [0.3831],
+  "llm_assertion_roulette": [0.9509],
+  "human_assertion_roulette": [0.3402],
+  "sensitive_equality_example": ["public void test() throws Throwable {\n        assertEquals(\"a\", CharRange.is('a').toString());\nassertEquals(\"a-e\", CharRange.isIn('a', 'e').toString());\n    }\n}"],
+  "winrates_against_humans": [
+    {
+      "CharRange_Human": 0.25,
+      "CharRange_LLM": 0.5,
+      "ByteVector_Human": 0,
+      "ByteVector_LLM": 0
+    }
+  ],
+  "n_def_games_against_humans": [
+    {
+      "CharRange_Human": 8,
+      "CharRange_LLM": 4,
+      "ByteVector_Human": 4,
+      "ByteVector_LLM": 8
+    }
+  ],
+  "defender_turing_test": [
+    {
+      "Human judged as Human": 7,
+      "Human judged as AI": 4,
+      "LLM judged as AI": 8,
+      "LLM judged as Unsure": 3,
+      "LLM judged as Human": 1,
+      "Human judged as Unsure": 1
+    }
+  ],
+  "def_turing_point_ratios": [
+    {
+      "Human": 0.6615,
+      "AI": 0.8707,
+      "Unsure": 0.8209
+    }
+  ],
+  "correlation_point_ratio_def_turing": [0.6885],
+  "dedup_tests": [
+    {
+      "1": 2476,
+      "2": 14
+    }
+  ],
+  "double_eq": [
+    {
+      "LLM": 0.1164,
+      "Human": 0.1452
+    }
+  ],
+  "p_opponent_equivalent": [0.0332],
+  "n_mutated_lines": [
+    {
+      "Human": 1.1675,
+      "LLM": 4.0594
+    }
+  ],
+  "mutant_methods_gini_bv": [
+    {
+      "Human": 0.4455,
+      "LLM": 0.8089
+    }
+  ],
+  "total_llm_mutant_method_gini_bv": [0.6633],
+  "mutant_methods_gini_cr": [
+    {
+      "LLM": 0.6793,
+      "Human": 0.4814
+    }
+  ],
+  "total_llm_mutant_method_gini_cr": [0.5408],
+  "n_mutants_with_multiple_methods": [5],
+  "att_point_ratios_summary": [
+    {
+      "cut_CharRange_Human": "CharRange",
+      "cut_ByteVector_Human": "ByteVector",
+      "cut_ByteVector_LLM": "ByteVector",
+      "cut_CharRange_LLM": "CharRange",
+      "author_llm_or_human.attacker_CharRange_Human": "Human",
+      "author_llm_or_human.attacker_ByteVector_Human": "Human",
+      "author_llm_or_human.attacker_ByteVector_LLM": "LLM",
+      "author_llm_or_human.attacker_CharRange_LLM": "LLM",
+      "mean_CharRange_Human": 1.3014,
+      "mean_ByteVector_Human": 7.8669,
+      "mean_ByteVector_LLM": 3.5752,
+      "mean_CharRange_LLM": 0.9223,
+      "sd_CharRange_Human": 0.5891,
+      "sd_ByteVector_Human": 9.4778,
+      "sd_ByteVector_LLM": 3.4248,
+      "sd_CharRange_LLM": 0.3701,
+      "max_CharRange_Human": 2.625,
+      "max_ByteVector_Human": 21.4,
+      "max_ByteVector_LLM": 10.9512,
+      "max_CharRange_LLM": 1.3333,
+      "min_CharRange_Human": 0.7302,
+      "min_ByteVector_Human": 1.2466,
+      "min_ByteVector_LLM": 1.0112,
+      "min_CharRange_LLM": 0.6154
+    }
+  ],
+  "regression_att_point_author": [0.2298],
+  "wasted_tokens_mutants": [
+    {
+      "input_tokens_FALSE": 3850551,
+      "input_tokens_TRUE": 152132,
+      "output_tokens_FALSE": 1111918,
+      "output_tokens_TRUE": 49048,
+      "input": 0.038,
+      "output": 0.0422
+    }
+  ],
+  "selection_tokens_mutants": [
+    {
+      "sinput": 1162157,
+      "soutput": 31399,
+      "input_tokens": 4002683,
+      "output_tokens": 1160966,
+      "input": 0.2903,
+      "output": 0.027
+    }
+  ],
+  "set_for_all_mutants": {
+    "CharRange": [24],
+    "ByteVector": [32]
+  },
+  "average_sets": [
+    {
+      "CharRange": 6.122,
+      "ByteVector": 7.4091
+    }
+  ],
+  "shortest_test_error": ["This test could not be submitted: \nimport org.junit.Test;\n\nimport static org.junit.Assert.*;\nimport static org.hamcrest.MatcherAssert.assertThat;\nimport static org.hamcrest.Matchers.*;\n\npublic class TestCharRange {\n    @Test(timeout = 4000)\n    public void test() throws Throwable {\n                CharRange r = CharRange.isNot('b');\n        assertEquals(\"^b\", r.toString());\n        assertTrue(r.contains('a') && !r.contains('b'));\n    }\n}It has violated these rules: \nThe submitted test is not valid:\n\t-[Test contains an invalid statement: r.contains('a') && !r.contains('b')]\nFix these problems."],
+  "average_defender_costs": [
+    {
+      "input_tokens": 4401.6192,
+      "output_tokens": 393.8176
+    }
+  ],
+  "average_attacker_costs": [
+    {
+      "input_tokens": 736.4736,
+      "output_tokens": 211.1639
+    }
+  ],
+  "dummy": [1]
+}

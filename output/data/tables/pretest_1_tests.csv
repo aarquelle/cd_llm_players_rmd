@@ -1,0 +1,6 @@
+"Strategy","Point ratio","Success rate","Input tokens","Output tokens"
+" Full Suite",2.49,"87.02%",67738,4265
+" Full Suite Plus Annotated",1.544,"82.88%",173208,6154
+" Annotated Single",1.121,"77.50%",335965,8259
+" Full Suite Plus Default",0.967,"87.67%",98843,5246
+" Default",0.744,"90.06%",123148,5689

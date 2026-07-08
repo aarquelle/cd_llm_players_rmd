@@ -9,7 +9,10 @@ library(scales)
 library(patchwork)
 library(ineq)
 
-if (FALSE) {
+reload_every_time <- TRUE
+
+
+if (reload_every_time) {
   rm(list = ls())
   source("scripts/load_data.R")
   source("scripts/load_pretests.R")
@@ -45,7 +48,7 @@ pr <- function(plot,
                height = 4,
                ...) {
   ggsave(
-    paste("../typst_ba/images/", filename, ".svg", sep = ""),
+    paste("output/images/", filename, ".svg", sep = ""),
     plot = plot,
     width = width,
     height = height,
@@ -106,7 +109,7 @@ ByteVector_mapping <- function(l) {
 }
 
 csv <- function(df, filename, row.names = FALSE) {
-  write.csv(df, file = paste("../typst_ba/data/tables/", filename, ".csv", sep = ""), row.names = row.names)
+  write.csv(df, file = paste("output/data/tables/", filename, ".csv", sep = ""), row.names = row.names)
 }
 
 colors.opinion <- c("red", "orange", "grey", "cyan", "blue")
@@ -236,7 +239,7 @@ list(
   number_llmvsllm_bytevector_games = mutants |> filter(study == "llmvsllm") |> filter(cut == "ByteVector") |> select(game_id) |> unique() |> nrow(),
   number_llmvsllm_charrange_games = mutants |> filter(study == "llmvsllm") |> filter(cut == "CharRange") |> select(game_id) |> unique() |> nrow(),
   
-  total_tests = total_tests |> pivot_wider(names_from = cut, values_from = number_of_tests),
+  total_tests = tests |> summarise(number_of_tests = n(), .by = cut) |> pivot_wider(names_from = cut, values_from = number_of_tests),
   
   loc = n_loc,
   
@@ -462,7 +465,7 @@ list(
   
   dummy = 1
 ) |>
-  write_json("../typst_ba/data/r_data.json", pretty = TRUE)
+  write_json("output/data/r_data.json", pretty = TRUE)
 
 
 
@@ -1533,7 +1536,7 @@ defender_games |>
     ggplot(aes(y = tokens, fill = success_failing_selection, x = in_out)) +
     geom_col(position = "dodge") +
     facet_wrap(~ cut) +
-    scale_fill_manual(values = c("#aaffff", "#00aaaa", "#007777")) +
+    scale_fill_manual(values = c("#aaffff", "#00aaaa", "red")) +
     labs(fill = NULL, x = NULL, y = "Token count") +
     geom_text(aes(label = round(tokens)), position = position_dodge(width = 0.9), vjust = -0.2) +
     scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
@@ -1687,50 +1690,6 @@ stepwise_success_rate <- function(msgs){
     labs(fill = "Generation type", x = NULL, y = "Tests per game") +
     facet_wrap(~ opponent_llm_or_human)
 } |> pr("test_generation_types")
-
-{
-  
-  
-  total_tests <- defender_games |>
-    filter(author_user_id == 6) |>
-    select(game_id, study, number_of_tests, cut)
-  
-  tests_per_game <- all_conversations |> 
-    filter(user_id == 6, is_success) |>
-    mutate(value = 1) |>
-    pivot_wider(names_from = defend_prompt_type, values_from = value, values_fill = 0) |>
-    summarise(SUITE_REPAIR = sum(SUITE_REPAIR), FOCUS = sum(FOCUS), SINGLE = sum(SINGLE), .by = c(study, game_id)) |>
-    left_join(total_tests, join_by(study, game_id)) |>
-    mutate(suite_tests = number_of_tests - SINGLE - FOCUS - SUITE_REPAIR) |>
-    pivot_longer(cols = c(SUITE_REPAIR, FOCUS, SINGLE, suite_tests), names_to = "test_type", values_to = "count")
-  
-  tokens_per_game <- all_conversations |>
-    filter(user_id == 6) |>
-    summarise(across(c(input_tokens, output_tokens), sum), .by = c(study, game_id, defend_prompt_type))
-  
-  tests_per_game |> 
-    #filter(is_success) |>
-    filter(test_type %in% c("FOCUS", "SINGLE", "SUITE_REPAIR", "suite_tests")) |>
-    mutate(test_type = ifelse(test_type == "suite_tests", "SUITE", test_type)) |>
-    left_join(tokens_per_game, join_by(study, game_id, test_type == defend_prompt_type)) |>
-    mutate(count = ifelse(count == 0, 1, count)) |>
-    mutate(input_tokens = input_tokens / count, output_tokens = output_tokens / count) |>
-    mutate(input_tokens = replace_na(input_tokens, 0), output_tokens = replace_na(output_tokens, 0)) |>
-    summarise(across(c(input_tokens, output_tokens), mean), .by = c(test_type, study)) |>
-    mutate(
-      test_type = replace_values(test_type, 
-                                      "FOCUS" ~ "Focused",
-                                      "SINGLE" ~ "Unfocused",
-                                      "SUITE_REPAIR" ~ "Repaired suite test",
-                                      "SUITE" ~ "Suite tests"
-      ),
-      study = ifelse(study == "userstudy", "Human attacker", "LLM attacker")
-    ) |>
-    ggplot(aes(fill = test_type, y = input_tokens, x = "")) +
-    scale_percentage_bars(with.percent = FALSE, text_size = 5) +
-    labs(fill = "Generation type", x = NULL, y = "Tokens per test") +
-    facet_wrap(~ study)
-} #|> pr("test_tokens_by_type")#BROKEN!!!
 
 {
   
@@ -1894,3 +1853,4 @@ pt_conversation_stats |>
   rename(Strategy = strategy, `Success rate` = is_success, `Point ratio` = point_ratio, `Input tokens` = input_tokens, `Output tokens` = output_tokens) |>
   relocate(`Strategy`, `Point ratio`) |>
   csv("pretest_2_tests")
+
