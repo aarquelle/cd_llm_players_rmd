@@ -34,6 +34,15 @@ add_test_code <- function(df) {
     )
 }
 
+add_mutant_code <- function(df) {
+  df |>
+    mutate(
+      mutant_code = read_file(paste("rawdata/", study, "/datadir/", mutant_file, sep = "")),
+      #mutant_code = substring(test_code, first = regexpr("public void test()", test_code)[1])
+    )
+}
+
+
 .simpleCap <- function(x) {
   s <- strsplit(x, " ")[[1]]
   paste(toupper(substring(s, 1, 1)), substring(s, 2),
@@ -433,12 +442,12 @@ list(
   
   average_defender_costs = all_conversations |>
     filter(strategy == "TEST_FULL_SUITE_PLUS_DEFAULT") |>
-    summarise(.by = c(game_id, study), across(c(input_tokens, output_tokens), mean)) |>
+    summarise(.by = c(game_id, study), across(c(input_tokens, output_tokens), sum)) |>
     summarise(across(c(input_tokens, output_tokens), mean)),
   
   average_attacker_costs = all_conversations |>
     filter(strategy == "MUTANT_ANNOTATED_SINGLE_METHOD") |>
-    summarise(.by = c(game_id, study), across(c(input_tokens, output_tokens), mean)) |>
+    summarise(.by = c(game_id, study), across(c(input_tokens, output_tokens), sum)) |>
     summarise(across(c(input_tokens, output_tokens), mean)),
     
     
@@ -1536,7 +1545,7 @@ defender_games |>
     ggplot(aes(y = tokens, fill = success_failing_selection, x = in_out)) +
     geom_col(position = "dodge") +
     facet_wrap(~ cut) +
-    scale_fill_manual(values = c("#aaffff", "#00aaaa", "red")) +
+    scale_fill_manual(values = c("#aaffff", "#00aaaa", "#007777")) +
     labs(fill = NULL, x = NULL, y = "Token count") +
     geom_text(aes(label = round(tokens)), position = position_dodge(width = 0.9), vjust = -0.2) +
     scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
@@ -1854,3 +1863,19 @@ pt_conversation_stats |>
   relocate(`Strategy`, `Point ratio`) |>
   csv("pretest_2_tests")
 
+
+
+
+mutants |>
+  filter(author_llm_or_human == "Human") |>
+  select(opponent_llm_or_human, author_opinion_fun, cut) |>
+  #summarise(.by = opponent_llm_or_human, avg = mean(author_opinion_fun), median = median(author_opinion_fun), n = n()) |>
+  ggplot(aes(x = opponent_llm_or_human, y = author_opinion_fun, fill = cut)) +
+  geom_boxplot()
+
+lm(
+  author_opinion_fun ~ opponent_llm_or_human + cut + round,
+  data = mutants |>
+    filter(author_llm_or_human == "Human") |>
+    summarise(.by = c(cut, round, opponent_llm_or_human), author_opinion_fun = mean(author_opinion_fun))
+) |> summary()

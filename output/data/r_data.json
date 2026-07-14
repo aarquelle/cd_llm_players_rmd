@@ -213,14 +213,14 @@
   "shortest_test_error": ["This test could not be submitted: \nimport org.junit.Test;\n\nimport static org.junit.Assert.*;\nimport static org.hamcrest.MatcherAssert.assertThat;\nimport static org.hamcrest.Matchers.*;\n\npublic class TestCharRange {\n    @Test(timeout = 4000)\n    public void test() throws Throwable {\n                CharRange r = CharRange.isNot('b');\n        assertEquals(\"^b\", r.toString());\n        assertTrue(r.contains('a') && !r.contains('b'));\n    }\n}It has violated these rules: \nThe submitted test is not valid:\n\t-[Test contains an invalid statement: r.contains('a') && !r.contains('b')]\nFix these problems."],
   "average_defender_costs": [
     {
-      "input_tokens": 4401.6192,
-      "output_tokens": 393.8176
+      "input_tokens": 85097.9516,
+      "output_tokens": 7388.4194
     }
   ],
   "average_attacker_costs": [
     {
-      "input_tokens": 736.4736,
-      "output_tokens": 211.1639
+      "input_tokens": 66711.3833,
+      "output_tokens": 19349.4333
     }
   ],
   "dummy": [1]
