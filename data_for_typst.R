@@ -1689,7 +1689,7 @@ stepwise_success_rate <- function(msgs){
     mutate(test_type = replace_values(test_type, 
                                       "FOCUS" ~ "Focused",
                                       "SINGLE" ~ "Unfocused",
-                                      "SUITE_REPAIR" ~ "Repaired suite test",
+                                      "SUITE_REPAIR" ~ "Repaired\nsuite test",
                                       "suite_tests" ~ "Suite tests"
                                       ),
            opponent_llm_or_human = paste(opponent_llm_or_human, "Attacker")
